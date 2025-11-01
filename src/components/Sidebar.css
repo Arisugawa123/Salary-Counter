@@ -1,0 +1,155 @@
+.sidebar {
+  height: 100vh;
+  background: #111111;
+  border-right: 1px solid #222222;
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  left: 0;
+  top: 0;
+  transition: width 0.3s ease;
+  z-index: 1000;
+}
+
+.sidebar.open {
+  width: 260px;
+}
+
+.sidebar.closed {
+  width: 80px;
+}
+
+.sidebar-header {
+  height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid #222222;
+}
+
+.logo-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-icon {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, #ffffff, #cccccc);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #000000;
+}
+
+.logo-text {
+  font-size: 20px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.toggle-button {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.toggle-button:hover {
+  background: #222222;
+  border-color: #333333;
+}
+
+.toggle-button svg.rotated {
+  transform: rotate(180deg);
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 20px 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.menu-list {
+  list-style: none;
+  padding: 0 15px;
+}
+
+.menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 14px 15px;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  color: #999999;
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 5px;
+  white-space: nowrap;
+}
+
+.sidebar.closed .menu-item {
+  justify-content: center;
+}
+
+.menu-item:hover {
+  background: #1a1a1a;
+  color: #ffffff;
+}
+
+.menu-item.active {
+  background: #ffffff;
+  color: #000000;
+  font-weight: 600;
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: #222222;
+  margin: 20px 15px;
+}
+
+/* Scrollbar styling */
+.sidebar-nav::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 3px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: #333333;
+}
+
+@media (max-width: 768px) {
+  .sidebar.open {
+    width: 260px;
+  }
+  
+  .sidebar.closed {
+    transform: translateX(-100%);
+  }
+}
