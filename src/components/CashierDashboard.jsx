@@ -19,7 +19,8 @@ import {
   Undo2,
   Percent,
   Save,
-  FileText
+  FileText,
+  Lock
 } from 'lucide-react'
 import './CashierDashboard.css'
 
@@ -34,6 +35,7 @@ function CashierDashboard() {
   const [priceInput, setPriceInput] = useState('')
   const [quantityInput, setQuantityInput] = useState(1)
   const [showSettings, setShowSettings] = useState(false)
+  const [activeSettingsMenu, setActiveSettingsMenu] = useState('printer')
   const [customerPaid, setCustomerPaid] = useState('')
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [currentDateTime, setCurrentDateTime] = useState(new Date())
@@ -44,6 +46,16 @@ function CashierDashboard() {
   // Settings
   const [selectedPrinter, setSelectedPrinter] = useState(localStorage.getItem('selectedPrinter') || 'default')
   const [autoPrint, setAutoPrint] = useState(localStorage.getItem('autoPrint') === 'true')
+  const [taxRate, setTaxRate] = useState(localStorage.getItem('taxRate') || '0')
+  const [receiptFooter, setReceiptFooter] = useState(localStorage.getItem('receiptFooter') || 'Thank you for your purchase!')
+  
+  // Settings menu items
+  const settingsMenuItems = [
+    { id: 'printer', icon: Printer, label: 'Printer Settings' },
+    { id: 'general', icon: Settings, label: 'General Settings' },
+    { id: 'receipt', icon: FileText, label: 'Receipt Settings' },
+    { id: 'about', icon: Package, label: 'About System' }
+  ]
 
   // Sample shop orders data with payment tracking
   const [shopOrders] = useState([
@@ -244,8 +256,17 @@ function CashierDashboard() {
   const saveSettings = () => {
     localStorage.setItem('selectedPrinter', selectedPrinter)
     localStorage.setItem('autoPrint', autoPrint.toString())
+    localStorage.setItem('taxRate', taxRate)
+    localStorage.setItem('receiptFooter', receiptFooter)
     alert('Settings saved successfully!')
-    setShowSettings(false)
+  }
+
+  // Toggle settings view
+  const toggleSettings = () => {
+    setShowSettings(!showSettings)
+    if (!showSettings) {
+      setActiveSettingsMenu('printer')
+    }
   }
 
   // Add shop order to cart
@@ -271,14 +292,39 @@ function CashierDashboard() {
   return (
     <div className="cashier-dashboard">
       {/* Main Content Area */}
-      <div className="cashier-content">
-        {/* Left Panel - Cart */}
-        <div className="cashier-left-panel">
-          <div className="panel-header">
-            <ShoppingCart size={24} />
-            <h2>Cart Items</h2>
-            <span className="item-count">{cart.length} items</span>
-          </div>
+      <div className={`cashier-content ${showSettings ? 'settings-active' : ''}`}>
+        {/* Left Panel - Cart or Settings Menu */}
+        <div className={`cashier-left-panel ${showSettings ? 'settings-mode' : ''}`}>
+          {showSettings ? (
+            <>
+              <div className="panel-header">
+                <Settings size={24} />
+                <h2>Settings</h2>
+              </div>
+              
+              <div className="settings-menu">
+                {settingsMenuItems.map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <button
+                      key={item.id}
+                      className={`settings-menu-item ${activeSettingsMenu === item.id ? 'active' : ''}`}
+                      onClick={() => setActiveSettingsMenu(item.id)}
+                    >
+                      <Icon size={20} />
+                      <span>{item.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="panel-header">
+                <ShoppingCart size={24} />
+                <h2>Cart Items</h2>
+                <span className="item-count">{cart.length} items</span>
+              </div>
 
           {/* Add Product Form */}
           <div className="add-product-form">
@@ -380,32 +426,205 @@ function CashierDashboard() {
               <strong>{formatPeso(total)}</strong>
             </div>
           </div>
+            </>
+          )}
         </div>
 
-        {/* Right Panel - Actions */}
+        {/* Right Panel - Actions or Settings Content */}
         <div className="cashier-right-panel">
           <div className="panel-header">
             <div className="panel-header-left">
-              <Calculator size={24} />
-              <h2>Actions</h2>
+              {showSettings ? (
+                <>
+                  <Settings size={24} />
+                  <h2>{settingsMenuItems.find(item => item.id === activeSettingsMenu)?.label}</h2>
+                </>
+              ) : (
+                <>
+                  <Calculator size={24} />
+                  <h2>Actions</h2>
+                </>
+              )}
             </div>
             <div className="panel-header-actions">
-              <button 
-                className={`header-btn ${showShopOrders ? 'active' : ''}`}
-                onClick={() => setShowShopOrders(!showShopOrders)}
-              >
-                <FileText size={18} />
-                <span>{showShopOrders ? 'Back to Actions' : 'Shop Orders'}</span>
-              </button>
-              <button className="header-btn">
-                <CheckCircle size={18} />
-                <span>History</span>
-              </button>
+              {!showSettings && (
+                <>
+                  <button 
+                    className={`header-btn ${showShopOrders ? 'active' : ''}`}
+                    onClick={() => setShowShopOrders(!showShopOrders)}
+                  >
+                    <FileText size={18} />
+                    <span>{showShopOrders ? 'Back to Actions' : 'Shop Orders'}</span>
+                  </button>
+                  <button className="header-btn">
+                    <CheckCircle size={18} />
+                    <span>History</span>
+                  </button>
+                </>
+              )}
+              {showSettings && (
+                <button className="header-btn active" onClick={toggleSettings}>
+                  <X size={18} />
+                  <span>Close Settings</span>
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Shop Orders View */}
-          {showShopOrders ? (
+          {/* Settings Content View */}
+          {showSettings ? (
+            <div className="settings-content-view">
+              {activeSettingsMenu === 'printer' && (
+                <div className="settings-panel">
+                  <div className="setting-item">
+                    <label>Default Receipt Printer</label>
+                    <select 
+                      value={selectedPrinter} 
+                      onChange={(e) => setSelectedPrinter(e.target.value)}
+                    >
+                      <option value="default">System Default Printer</option>
+                      <option value="thermal">Thermal Receipt Printer</option>
+                      <option value="pos-80mm">POS 80mm Printer</option>
+                      <option value="pos-58mm">POS 58mm Printer</option>
+                      <option value="epson">Epson TM Series</option>
+                      <option value="star">Star Micronics</option>
+                    </select>
+                    <small className="setting-hint">Set printer in Chrome kiosk mode launch command</small>
+                  </div>
+
+                  <div className="setting-item checkbox-item">
+                    <input 
+                      type="checkbox" 
+                      id="autoPrintInline"
+                      checked={autoPrint}
+                      onChange={(e) => setAutoPrint(e.target.checked)}
+                    />
+                    <label htmlFor="autoPrintInline">Auto-print receipt after payment</label>
+                  </div>
+
+                  <div className="setting-info">
+                    <h5>Kiosk Mode Command:</h5>
+                    <code className="command-code">
+                      chrome.exe --kiosk --kiosk-printing --printer="EPSONB4B406 (WF-C5790 Series)" --app=http://localhost:5173
+                    </code>
+                    <small>Replace with your actual printer name from Windows Settings</small>
+                  </div>
+
+                  <button className="btn-save-settings" onClick={saveSettings}>
+                    <CheckCircle size={20} />
+                    Save Printer Settings
+                  </button>
+                </div>
+              )}
+
+              {activeSettingsMenu === 'general' && (
+                <div className="settings-panel">
+                  <div className="setting-item">
+                    <label>Tax Rate (%)</label>
+                    <input 
+                      type="number" 
+                      value={taxRate}
+                      onChange={(e) => setTaxRate(e.target.value)}
+                      min="0" 
+                      max="100" 
+                      step="0.1"
+                    />
+                    <small className="setting-hint">Default tax percentage applied to transactions</small>
+                  </div>
+
+                  <div className="setting-item">
+                    <label>Currency Symbol</label>
+                    <input 
+                      type="text" 
+                      value="₱"
+                      disabled
+                    />
+                    <small className="setting-hint">Philippine Peso (₱)</small>
+                  </div>
+
+                  <div className="setting-item">
+                    <label>Business Name</label>
+                    <input 
+                      type="text" 
+                      defaultValue="IRONWOLF SHOP"
+                    />
+                  </div>
+
+                  <button className="btn-save-settings" onClick={saveSettings}>
+                    <CheckCircle size={20} />
+                    Save General Settings
+                  </button>
+                </div>
+              )}
+
+              {activeSettingsMenu === 'receipt' && (
+                <div className="settings-panel">
+                  <div className="setting-item">
+                    <label>Receipt Footer Text</label>
+                    <textarea 
+                      value={receiptFooter}
+                      onChange={(e) => setReceiptFooter(e.target.value)}
+                      rows="3"
+                      placeholder="Enter footer text for receipts..."
+                    />
+                    <small className="setting-hint">This text appears at the bottom of all receipts</small>
+                  </div>
+
+                  <div className="setting-item checkbox-item">
+                    <input type="checkbox" id="showLogo" defaultChecked />
+                    <label htmlFor="showLogo">Show business logo on receipt</label>
+                  </div>
+
+                  <div className="setting-item checkbox-item">
+                    <input type="checkbox" id="showQR" />
+                    <label htmlFor="showQR">Include QR code for digital receipt</label>
+                  </div>
+
+                  <button className="btn-save-settings" onClick={saveSettings}>
+                    <CheckCircle size={20} />
+                    Save Receipt Settings
+                  </button>
+                </div>
+              )}
+
+              {activeSettingsMenu === 'about' && (
+                <div className="settings-panel about-panel">
+                  <div className="about-logo">
+                    <Lock size={48} />
+                  </div>
+                  <h3>IRONWOLF SHOP SYSTEM</h3>
+                  <p className="version-large">Version 1.2.1</p>
+                  
+                  <div className="about-info">
+                    <div className="info-row">
+                      <span>Release Date:</span>
+                      <strong>November 2024</strong>
+                    </div>
+                    <div className="info-row">
+                      <span>License:</span>
+                      <strong>Commercial</strong>
+                    </div>
+                    <div className="info-row">
+                      <span>Developer:</span>
+                      <strong>IRONWOLF Technologies</strong>
+                    </div>
+                  </div>
+
+                  <div className="feature-list">
+                    <h4>Features:</h4>
+                    <ul>
+                      <li>✓ Point of Sale (POS) System</li>
+                      <li>✓ Inventory Management</li>
+                      <li>✓ Order Tracking</li>
+                      <li>✓ Payment Processing</li>
+                      <li>✓ Receipt Printing</li>
+                      <li>✓ Multi-user Support</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : showShopOrders ? (
             <div className="shop-orders-view">
               <div className="orders-table-container">
                 <table className="orders-table">
@@ -549,7 +768,7 @@ function CashierDashboard() {
 
             <button 
               className="action-btn"
-              onClick={() => setShowSettings(true)}
+              onClick={toggleSettings}
             >
               <Settings size={24} />
               <span>Settings</span>
@@ -640,67 +859,6 @@ function CashierDashboard() {
         </div>
       )}
 
-      {/* Settings Modal */}
-      {showSettings && (
-        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
-          <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Cashier Settings</h3>
-              <button onClick={() => setShowSettings(false)}>
-                <X size={24} />
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="settings-section">
-                <h4>Printer Settings</h4>
-                
-                <div className="setting-item">
-                  <label>Default Receipt Printer</label>
-                  <select 
-                    value={selectedPrinter} 
-                    onChange={(e) => setSelectedPrinter(e.target.value)}
-                  >
-                    <option value="default">System Default Printer</option>
-                    <option value="thermal">Thermal Receipt Printer</option>
-                    <option value="pos-80mm">POS 80mm Printer</option>
-                    <option value="pos-58mm">POS 58mm Printer</option>
-                    <option value="epson">Epson TM Series</option>
-                    <option value="star">Star Micronics</option>
-                  </select>
-                  <small className="setting-hint">Note: Set printer in Chrome kiosk mode launch command</small>
-                </div>
-
-                <div className="setting-item checkbox-item">
-                  <input 
-                    type="checkbox" 
-                    id="autoPrint"
-                    checked={autoPrint}
-                    onChange={(e) => setAutoPrint(e.target.checked)}
-                  />
-                  <label htmlFor="autoPrint">Auto-print receipt after payment</label>
-                </div>
-
-                <div className="setting-info">
-                  <h5>Kiosk Mode Command:</h5>
-                  <code className="command-code">
-                    chrome.exe --kiosk --kiosk-printing --printer="Your Printer Name" --app=http://localhost:5173
-                  </code>
-                  <small>Replace "Your Printer Name" with actual printer name from Windows Settings</small>
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-cancel" onClick={() => setShowSettings(false)}>
-                Close
-              </button>
-              <button className="btn-complete" onClick={saveSettings}>
-                <CheckCircle size={20} />
-                Save Settings
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
