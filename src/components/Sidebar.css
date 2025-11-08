@@ -153,3 +153,156 @@
     transform: translateX(-100%);
   }
 }
+
+/* Access Modal */
+.access-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  animation: fadeIn 0.25s ease-out;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+}
+
+.access-modal-content {
+  background: #111111;
+  border: 1px solid #2a2a2a;
+  border-radius: 20px;
+  padding: 32px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: modalFadeIn 0.35s ease-out;
+}
+
+.access-modal-content h3 {
+  font-size: 20px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0 0 8px 0;
+}
+
+.access-modal-content p {
+  font-size: 14px;
+  color: #9ca3af;
+  margin: 0 0 20px 0;
+  line-height: 1.5;
+}
+
+.access-modal-content input {
+  width: 100%;
+  padding: 14px 16px;
+  background: #0a0a0a;
+  border: 2px solid #2a2a2a;
+  border-radius: 12px;
+  font-size: 15px;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 4px;
+  text-align: center;
+  color: #ffffff;
+  transition: all 0.3s ease;
+  margin-bottom: 12px;
+}
+
+.access-modal-content input:focus {
+  outline: none;
+  border-color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.1);
+}
+
+.access-modal-content input::placeholder {
+  color: #666666;
+  letter-spacing: normal;
+}
+
+.access-error {
+  padding: 10px 14px;
+  background: #1a1a1a;
+  color: #ff6b6b;
+  border: 1px solid #ff6b6b;
+  border-radius: 8px;
+  font-size: 13px;
+  text-align: center;
+  margin-bottom: 16px;
+  animation: shake 0.5s ease-out;
+}
+
+.access-modal-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.access-btn {
+  flex: 1;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cancel-btn {
+  background: #1a1a1a;
+  border: 2px solid #2a2a2a;
+  color: #ffffff;
+}
+
+.cancel-btn:hover {
+  background: #2a2a2a;
+  border-color: #3a3a3a;
+  transform: translateY(-1px);
+}
+
+.confirm-btn {
+  background: #ffffff;
+  color: #0a0a0a;
+  border: 2px solid #ffffff;
+}
+
+.confirm-btn:hover:not(:disabled) {
+  background: #f0f0f0;
+  transform: translateY(-1px);
+}
+
+.confirm-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-10px); }
+  75% { transform: translateX(10px); }
+}

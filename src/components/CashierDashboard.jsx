@@ -1,0 +1,709 @@
+import { useState, useEffect } from 'react'
+import { 
+  Plus, 
+  Minus, 
+  Trash2, 
+  ShoppingCart, 
+  DollarSign,
+  CreditCard,
+  X,
+  Calculator,
+  Printer,
+  CheckCircle,
+  RotateCcw,
+  Settings,
+  Calendar,
+  Clock,
+  Users,
+  Package,
+  Undo2,
+  Percent,
+  Save,
+  FileText
+} from 'lucide-react'
+import './CashierDashboard.css'
+
+// Format number with commas and peso sign
+const formatPeso = (amount) => {
+  return `₱${Number(amount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function CashierDashboard() {
+  const [cart, setCart] = useState([])
+  const [productInput, setProductInput] = useState('')
+  const [priceInput, setPriceInput] = useState('')
+  const [quantityInput, setQuantityInput] = useState(1)
+  const [showSettings, setShowSettings] = useState(false)
+  const [customerPaid, setCustomerPaid] = useState('')
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [currentDateTime, setCurrentDateTime] = useState(new Date())
+  const [customerCounter, setCustomerCounter] = useState(1)
+  const [totalItemsSold, setTotalItemsSold] = useState(0)
+  const [showShopOrders, setShowShopOrders] = useState(false)
+  
+  // Settings
+  const [selectedPrinter, setSelectedPrinter] = useState(localStorage.getItem('selectedPrinter') || 'default')
+  const [autoPrint, setAutoPrint] = useState(localStorage.getItem('autoPrint') === 'true')
+
+  // Sample shop orders data with payment tracking
+  const [shopOrders] = useState([
+    { 
+      id: 1, 
+      orderNumber: 'SO-001', 
+      service: 'Sublimation', 
+      customer: 'John Doe', 
+      status: 'Pending Payment', 
+      totalAmount: 2500,
+      paidAmount: 1000,
+      balance: 1500,
+      date: '2024-11-08' 
+    },
+    { 
+      id: 2, 
+      orderNumber: 'SO-002', 
+      service: 'Tarpaulin', 
+      customer: 'Jane Smith', 
+      status: 'Pending Payment', 
+      totalAmount: 3500,
+      paidAmount: 2000,
+      balance: 1500,
+      date: '2024-11-08' 
+    },
+    { 
+      id: 3, 
+      orderNumber: 'SO-003', 
+      service: 'Printing', 
+      customer: 'Bob Johnson', 
+      status: 'Paid', 
+      totalAmount: 1200,
+      paidAmount: 1200,
+      balance: 0,
+      date: '2024-11-07' 
+    },
+    { 
+      id: 4, 
+      orderNumber: 'SO-004', 
+      service: 'Sublimation', 
+      customer: 'Alice Brown', 
+      status: 'Pending Payment', 
+      totalAmount: 1800,
+      paidAmount: 500,
+      balance: 1300,
+      date: '2024-11-07' 
+    },
+    { 
+      id: 5, 
+      orderNumber: 'SO-005', 
+      service: 'Lamination', 
+      customer: 'Charlie Wilson', 
+      status: 'Pending Payment', 
+      totalAmount: 800,
+      paidAmount: 300,
+      balance: 500,
+      date: '2024-11-06' 
+    },
+    { 
+      id: 6, 
+      orderNumber: 'SO-006', 
+      service: 'ID Printing', 
+      customer: 'Diana Lee', 
+      status: 'Paid', 
+      totalAmount: 600,
+      paidAmount: 600,
+      balance: 0,
+      date: '2024-11-06' 
+    },
+  ])
+
+  // Update date and time every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentDateTime(new Date())
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  // Add item to cart
+  const addToCart = () => {
+    if (!productInput || !priceInput || quantityInput <= 0) {
+      alert('Please fill in all fields')
+      return
+    }
+
+    const newItem = {
+      id: Date.now(),
+      name: productInput,
+      price: parseFloat(priceInput),
+      quantity: parseInt(quantityInput),
+      total: parseFloat(priceInput) * parseInt(quantityInput)
+    }
+
+    setCart([...cart, newItem])
+    setProductInput('')
+    setPriceInput('')
+    setQuantityInput(1)
+  }
+
+  // Remove item from cart
+  const removeFromCart = (id) => {
+    setCart(cart.filter(item => item.id !== id))
+  }
+
+  // Update quantity
+  const updateQuantity = (id, newQuantity) => {
+    if (newQuantity <= 0) return
+    setCart(cart.map(item => 
+      item.id === id 
+        ? { ...item, quantity: newQuantity, total: item.price * newQuantity }
+        : item
+    ))
+  }
+
+  // Calculate totals
+  const subtotal = cart.reduce((sum, item) => sum + item.total, 0)
+  const total = subtotal
+  const change = customerPaid ? parseFloat(customerPaid) - total : 0
+
+  // Clear cart
+  const clearCart = () => {
+    if (cart.length > 0) {
+      if (window.confirm('Clear all items from cart?')) {
+        setCart([])
+        setCustomerPaid('')
+      }
+    }
+  }
+
+  // Process payment
+  const processPayment = () => {
+    if (cart.length === 0) {
+      alert('Cart is empty')
+      return
+    }
+    setShowPaymentModal(true)
+  }
+
+  // Complete transaction
+  const completeTransaction = () => {
+    if (!customerPaid || parseFloat(customerPaid) < total) {
+      alert('Insufficient payment amount')
+      return
+    }
+
+    // Update statistics
+    const itemsInTransaction = cart.reduce((sum, item) => sum + item.quantity, 0)
+    setTotalItemsSold(prev => prev + itemsInTransaction)
+    setCustomerCounter(prev => prev + 1)
+
+    // Here you would typically save the transaction to database
+    alert(`Transaction completed!\nTotal: ${formatPeso(total)}\nPaid: ${formatPeso(customerPaid)}\nChange: ${formatPeso(change)}`)
+    
+    setCart([])
+    setCustomerPaid('')
+    setShowPaymentModal(false)
+
+    // Auto-print if enabled
+    if (autoPrint) {
+      setTimeout(() => {
+        window.print()
+      }, 500)
+    }
+  }
+
+  // Format date and time
+  const formatDate = (date) => {
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'short',
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric' 
+    })
+  }
+
+  const formatTime = (date) => {
+    return date.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    })
+  }
+
+  // Print receipt
+  const printReceipt = () => {
+    if (cart.length === 0) {
+      alert('Cart is empty')
+      return
+    }
+    
+    // In kiosk mode with --kiosk-printing flag, this will auto-print to default printer
+    window.print()
+  }
+
+  // Save settings
+  const saveSettings = () => {
+    localStorage.setItem('selectedPrinter', selectedPrinter)
+    localStorage.setItem('autoPrint', autoPrint.toString())
+    alert('Settings saved successfully!')
+    setShowSettings(false)
+  }
+
+  // Add shop order to cart
+  const addOrderToCart = (order) => {
+    if (order.balance <= 0) {
+      alert('This order is already fully paid')
+      return
+    }
+
+    const newItem = {
+      id: Date.now(),
+      name: `${order.service} - ${order.orderNumber}`,
+      price: order.balance,
+      quantity: 1,
+      total: order.balance,
+      orderReference: order.orderNumber
+    }
+
+    setCart([...cart, newItem])
+    alert(`Added ${order.service} (Balance: ${formatPeso(order.balance)}) to cart`)
+  }
+
+  return (
+    <div className="cashier-dashboard">
+      {/* Main Content Area */}
+      <div className="cashier-content">
+        {/* Left Panel - Cart */}
+        <div className="cashier-left-panel">
+          <div className="panel-header">
+            <ShoppingCart size={24} />
+            <h2>Cart Items</h2>
+            <span className="item-count">{cart.length} items</span>
+          </div>
+
+          {/* Add Product Form */}
+          <div className="add-product-form">
+            <input
+              type="text"
+              placeholder="Product name"
+              value={productInput}
+              onChange={(e) => setProductInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && addToCart()}
+            />
+            <input
+              type="number"
+              placeholder="Price"
+              value={priceInput}
+              onChange={(e) => setPriceInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && addToCart()}
+              min="0"
+              step="0.01"
+            />
+            <input
+              type="number"
+              placeholder="Qty"
+              value={quantityInput}
+              onChange={(e) => setQuantityInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && addToCart()}
+              min="1"
+            />
+            <button className="btn-add-item" onClick={addToCart}>
+              <Plus size={20} />
+              Add
+            </button>
+          </div>
+
+          {/* Cart Table */}
+          <div className="cart-table-container">
+            {cart.length === 0 ? (
+              <div className="empty-cart">
+                <ShoppingCart size={48} />
+                <p>Cart is empty</p>
+                <span>Add items to get started</span>
+              </div>
+            ) : (
+              <table className="cart-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Price</th>
+                    <th>Quantity</th>
+                    <th>Total</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cart.map(item => (
+                    <tr key={item.id}>
+                      <td className="product-name">{item.name}</td>
+                      <td>{formatPeso(item.price)}</td>
+                      <td>
+                        <div className="quantity-controls">
+                          <button 
+                            onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                            className="qty-btn"
+                          >
+                            <Minus size={14} />
+                          </button>
+                          <span className="qty-display">{item.quantity}</span>
+                          <button 
+                            onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                            className="qty-btn"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="item-total">{formatPeso(item.total)}</td>
+                      <td>
+                        <button 
+                          onClick={() => removeFromCart(item.id)}
+                          className="btn-remove"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Cart Summary */}
+          <div className="cart-summary">
+            <div className="summary-row subtotal-row">
+              <span>Subtotal:</span>
+              <strong>{formatPeso(subtotal)}</strong>
+            </div>
+            <div className="summary-row total-row">
+              <span>Total Amount:</span>
+              <strong>{formatPeso(total)}</strong>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Panel - Actions */}
+        <div className="cashier-right-panel">
+          <div className="panel-header">
+            <div className="panel-header-left">
+              <Calculator size={24} />
+              <h2>Actions</h2>
+            </div>
+            <div className="panel-header-actions">
+              <button 
+                className={`header-btn ${showShopOrders ? 'active' : ''}`}
+                onClick={() => setShowShopOrders(!showShopOrders)}
+              >
+                <FileText size={18} />
+                <span>{showShopOrders ? 'Back to Actions' : 'Shop Orders'}</span>
+              </button>
+              <button className="header-btn">
+                <CheckCircle size={18} />
+                <span>History</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Shop Orders View */}
+          {showShopOrders ? (
+            <div className="shop-orders-view">
+              <div className="orders-table-container">
+                <table className="orders-table">
+                  <thead>
+                    <tr>
+                      <th>Order #</th>
+                      <th>Service</th>
+                      <th>Customer</th>
+                      <th>Total</th>
+                      <th>Paid</th>
+                      <th>Balance</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shopOrders
+                      .filter(order => order.balance > 0)
+                      .map((order) => (
+                      <tr key={order.id}>
+                        <td className="order-number">{order.orderNumber}</td>
+                        <td className="service-name">{order.service}</td>
+                        <td>{order.customer}</td>
+                        <td className="order-amount">{formatPeso(order.totalAmount)}</td>
+                        <td className="paid-amount">{formatPeso(order.paidAmount)}</td>
+                        <td className="balance-amount">
+                          <span className="has-balance">
+                            {formatPeso(order.balance)}
+                          </span>
+                        </td>
+                        <td>
+                          <button 
+                            className="btn-add-to-cart"
+                            onClick={() => addOrderToCart(order)}
+                          >
+                            <ShoppingCart size={16} />
+                            <span>Add to Cart</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Statistics Section */}
+              <div className="statistics-section">
+            <div className="stat-item">
+              <div className="stat-icon">
+                <Calendar size={18} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-title">Date</span>
+                <span className="stat-data">{formatDate(currentDateTime)}</span>
+              </div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-icon">
+                <Clock size={18} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-title">Time</span>
+                <span className="stat-data">{formatTime(currentDateTime)}</span>
+              </div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-icon">
+                <Users size={18} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-title">Customers</span>
+                <span className="stat-data">{customerCounter}</span>
+              </div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-icon">
+                <Package size={18} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-title">Items Sold</span>
+                <span className="stat-data">{totalItemsSold}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="action-buttons">
+            <button 
+              className="action-btn primary"
+              onClick={processPayment}
+              disabled={cart.length === 0}
+            >
+              <CreditCard size={24} />
+              <span>Process Payment</span>
+            </button>
+
+            <button 
+              className="action-btn cash-drawer"
+            >
+              <DollarSign size={24} />
+              <span>Cash Drawer</span>
+            </button>
+
+            <button 
+              className="action-btn"
+              onClick={printReceipt}
+              disabled={cart.length === 0}
+            >
+              <Printer size={24} />
+              <span>Print Receipt</span>
+            </button>
+
+            <button 
+              className="action-btn"
+              onClick={clearCart}
+            >
+              <RotateCcw size={24} />
+              <span>Clear Cart</span>
+            </button>
+
+            <button 
+              className="action-btn"
+            >
+              <Undo2 size={24} />
+              <span>Refund</span>
+            </button>
+
+            <button 
+              className="action-btn"
+            >
+              <Percent size={24} />
+              <span>Discount</span>
+            </button>
+
+            <button 
+              className="action-btn"
+            >
+              <Save size={24} />
+              <span>Save Sale</span>
+            </button>
+
+            <button 
+              className="action-btn"
+              onClick={() => setShowSettings(true)}
+            >
+              <Settings size={24} />
+              <span>Settings</span>
+            </button>
+          </div>
+
+              {/* Quick Stats */}
+              <div className="quick-stats">
+                <div className="stat-card">
+                  <span className="stat-label">Items in Cart</span>
+                  <span className="stat-value">{cart.length}</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-label">Total Amount</span>
+                  <span className="stat-value">{formatPeso(total)}</span>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Payment Modal */}
+      {showPaymentModal && (
+        <div className="modal-overlay" onClick={() => setShowPaymentModal(false)}>
+          <div className="payment-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Process Payment</h3>
+              <button onClick={() => setShowPaymentModal(false)}>
+                <X size={24} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="payment-summary">
+                <div className="payment-row">
+                  <span>Total Amount:</span>
+                  <strong className="amount-large">{formatPeso(total)}</strong>
+                </div>
+              </div>
+
+              <div className="payment-input-group">
+                <label>Amount Paid:</label>
+                <input
+                  type="number"
+                  value={customerPaid}
+                  onChange={(e) => setCustomerPaid(e.target.value)}
+                  placeholder="0.00"
+                  min="0"
+                  step="0.01"
+                  autoFocus
+                />
+              </div>
+
+              {customerPaid && (
+                <div className="change-display">
+                  <span>Change:</span>
+                  <strong className={change >= 0 ? 'change-positive' : 'change-negative'}>
+                    {formatPeso(Math.max(0, change))}
+                  </strong>
+                </div>
+              )}
+
+              <div className="quick-amounts">
+                <button onClick={() => setCustomerPaid(total.toString())}>Exact</button>
+                <button onClick={() => setCustomerPaid('100')}>₱100</button>
+                <button onClick={() => setCustomerPaid('200')}>₱200</button>
+                <button onClick={() => setCustomerPaid('500')}>₱500</button>
+                <button onClick={() => setCustomerPaid('1000')}>₱1000</button>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button 
+                className="btn-cancel" 
+                onClick={() => setShowPaymentModal(false)}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn-complete" 
+                onClick={completeTransaction}
+                disabled={!customerPaid || parseFloat(customerPaid) < total}
+              >
+                <CheckCircle size={20} />
+                Complete Transaction
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Cashier Settings</h3>
+              <button onClick={() => setShowSettings(false)}>
+                <X size={24} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="settings-section">
+                <h4>Printer Settings</h4>
+                
+                <div className="setting-item">
+                  <label>Default Receipt Printer</label>
+                  <select 
+                    value={selectedPrinter} 
+                    onChange={(e) => setSelectedPrinter(e.target.value)}
+                  >
+                    <option value="default">System Default Printer</option>
+                    <option value="thermal">Thermal Receipt Printer</option>
+                    <option value="pos-80mm">POS 80mm Printer</option>
+                    <option value="pos-58mm">POS 58mm Printer</option>
+                    <option value="epson">Epson TM Series</option>
+                    <option value="star">Star Micronics</option>
+                  </select>
+                  <small className="setting-hint">Note: Set printer in Chrome kiosk mode launch command</small>
+                </div>
+
+                <div className="setting-item checkbox-item">
+                  <input 
+                    type="checkbox" 
+                    id="autoPrint"
+                    checked={autoPrint}
+                    onChange={(e) => setAutoPrint(e.target.checked)}
+                  />
+                  <label htmlFor="autoPrint">Auto-print receipt after payment</label>
+                </div>
+
+                <div className="setting-info">
+                  <h5>Kiosk Mode Command:</h5>
+                  <code className="command-code">
+                    chrome.exe --kiosk --kiosk-printing --printer="Your Printer Name" --app=http://localhost:5173
+                  </code>
+                  <small>Replace "Your Printer Name" with actual printer name from Windows Settings</small>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-cancel" onClick={() => setShowSettings(false)}>
+                Close
+              </button>
+              <button className="btn-complete" onClick={saveSettings}>
+                <CheckCircle size={20} />
+                Save Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default CashierDashboard
+

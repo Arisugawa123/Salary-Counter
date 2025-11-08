@@ -308,7 +308,8 @@ export const fetchSettings = async () => {
         rushTarpCommissionRate: 50,
         regularCommissionRate: 20,
         lateDeductionRate: 1,
-        maxAbsencesForDayOff: 3
+        maxAbsencesForDayOff: 3,
+        customCommissions: []
       }
     }
     console.error('Error fetching settings:', error)

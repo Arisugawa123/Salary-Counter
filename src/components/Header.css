@@ -76,6 +76,7 @@
 .system-title {
   display: flex;
   align-items: center;
+  gap: 12px;
   padding: 10px 20px;
   background: linear-gradient(135deg, #1a1a1a, #111111);
   border: 1px solid #2a2a2a;
@@ -88,6 +89,62 @@
   color: #ffffff;
   letter-spacing: 0.5px;
   text-transform: uppercase;
+}
+
+.system-version {
+  font-size: 12px;
+  font-weight: 600;
+  color: #888888;
+  padding: 4px 10px;
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  letter-spacing: 0.3px;
+}
+
+.user-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.user-role {
+  color: #a78bfa;
+}
+
+.logout-button {
+  background: #dc2626;
+  border: none;
+  color: white;
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.logout-button:hover {
+  background: #b91c1c;
+  transform: translateY(-1px);
+}
+
+.logout-button:active {
+  transform: translateY(0);
 }
 
 @media (max-width: 768px) {
@@ -105,10 +162,16 @@
   
   .system-title {
     padding: 8px 12px;
+    gap: 8px;
   }
   
   .system-name {
     font-size: 12px;
+  }
+
+  .system-version {
+    font-size: 10px;
+    padding: 3px 8px;
   }
 }
 
@@ -118,6 +181,11 @@
   }
   
   .system-name {
-    font-size: 11px;
+    font-size: 10px;
+  }
+
+  .system-version {
+    font-size: 9px;
+    padding: 2px 6px;
   }
 }

@@ -1,0 +1,8 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome]
+"PrintingEnabled"=dword:00000001
+"DisablePrintPreview"=dword:00000001
+"SilentPrintingEnabled"=dword:00000001
+"PrintPreviewUseSystemDefaultPrinter"=dword:00000001
+

@@ -460,6 +460,26 @@
   color: #ffffff;
 }
 
+.accountant-net-pay-only {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  gap: 16px;
+}
+
+.restricted-notice {
+  font-size: 13px;
+  color: #9ca3af;
+  text-align: center;
+  margin: 0;
+  padding: 8px 16px;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+}
+
 .search-dropdown-container {
   position: relative;
 }

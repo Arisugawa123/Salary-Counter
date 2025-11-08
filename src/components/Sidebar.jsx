@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { 
   LayoutDashboard, 
   DollarSign, 
@@ -7,15 +8,62 @@ import {
   Settings,
   ChevronLeft
 } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
 import './Sidebar.css'
 
 function Sidebar({ isOpen, setIsOpen, activeView, setActiveView }) {
+  const { user } = useAuth()
+  const isManager = user?.role === 'manager'
+  const [showAccessModal, setShowAccessModal] = useState(false)
+  const [accessCode, setAccessCode] = useState('')
+  const [accessError, setAccessError] = useState('')
+
+  const MANAGER_ACCESS_CODE = '050123'
+
+  useEffect(() => {
+    if (showAccessModal) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = 'unset'
+    }
+
+    return () => {
+      document.body.style.overflow = 'unset'
+    }
+  }, [showAccessModal])
+
+  const handleSettingsClick = () => {
+    if (isManager) {
+      setActiveView('settings')
+    } else {
+      setShowAccessModal(true)
+      setAccessCode('')
+      setAccessError('')
+    }
+  }
+
+  const handleAccessSubmit = () => {
+    if (accessCode === MANAGER_ACCESS_CODE) {
+      setActiveView('settings')
+      setShowAccessModal(false)
+      setAccessCode('')
+      setAccessError('')
+    } else {
+      setAccessError('Invalid access code')
+    }
+  }
+
+  const handleAccessKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleAccessSubmit()
+    }
+  }
   const menuItems = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { id: 'salary', icon: DollarSign, label: 'Salary Counter' },
-    { id: 'payroll', icon: Wallet, label: 'Payroll' },
+    ...(isManager ? [{ id: 'payroll', icon: Wallet, label: 'Payroll' }] : []),
     { id: 'cashadvance', icon: CreditCard, label: 'Cash Advance Records' },
-    { id: 'dayoff', icon: Calendar, label: 'Day Off Management' },
+    ...(isManager ? [{ id: 'dayoff', icon: Calendar, label: 'Day Off Management' }] : []),
   ]
 
   const bottomItems = [
@@ -62,7 +110,7 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView }) {
             <li key={item.id}>
               <button
                 className={`menu-item ${activeView === item.id ? 'active' : ''}`}
-                onClick={() => setActiveView(item.id)}
+                onClick={() => item.id === 'settings' ? handleSettingsClick() : setActiveView(item.id)}
                 title={!isOpen ? item.label : ''}
               >
                 <item.icon size={20} />
@@ -72,6 +120,44 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView }) {
           ))}
         </ul>
       </nav>
+
+      {showAccessModal && (
+        <div className="access-modal-overlay" onClick={() => setShowAccessModal(false)}>
+          <div className="access-modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>Manager Access Required</h3>
+            <p>Settings require manager access. Please enter the access code.</p>
+            <input
+              type="password"
+              value={accessCode}
+              onChange={(e) => setAccessCode(e.target.value)}
+              onKeyPress={handleAccessKeyPress}
+              placeholder="Enter access code"
+              maxLength="6"
+              autoFocus
+            />
+            {accessError && <div className="access-error">{accessError}</div>}
+            <div className="access-modal-actions">
+              <button 
+                className="access-btn cancel-btn" 
+                onClick={() => {
+                  setShowAccessModal(false)
+                  setAccessCode('')
+                  setAccessError('')
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="access-btn confirm-btn" 
+                onClick={handleAccessSubmit}
+                disabled={!accessCode}
+              >
+                Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   )
 }

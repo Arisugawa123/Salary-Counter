@@ -16,6 +16,7 @@ import {
   CheckCircle,
   AlertCircle
 } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
 import './Dashboard.css'
 import './TimeTracker.css'
 import './TimeTable.css'
@@ -45,7 +46,14 @@ const formatPeso = (amount) => {
   return `₱${Number(amount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+// Censor sensitive data for accountants
+const censorRate = (amount) => {
+  return '₱•••••'
+}
+
 function Dashboard({ activeView, setActiveView }) {
+  const { user } = useAuth()
+  const isManager = user?.role === 'manager'
   // Load data from Supabase
   const [employees, setEmployees] = useState([])
 
@@ -95,6 +103,14 @@ function Dashboard({ activeView, setActiveView }) {
   const [regularCommissionRate, setRegularCommissionRate] = useState(20)
   const [lateDeductionRate, setLateDeductionRate] = useState(1)
   const [maxAbsencesForDayOff, setMaxAbsencesForDayOff] = useState(3)
+  const [customCommissions, setCustomCommissions] = useState([])
+  
+  // Custom Commission Form
+  const [newCommissionName, setNewCommissionName] = useState('')
+  const [newCommissionRate, setNewCommissionRate] = useState(0)
+  
+  // Custom Commission Counts
+  const [customCommissionCounts, setCustomCommissionCounts] = useState({})
 
   // Employee Form Data
   const [formData, setFormData] = useState({
@@ -155,6 +171,7 @@ function Dashboard({ activeView, setActiveView }) {
   })
   const [editingPayrollRecordId, setEditingPayrollRecordId] = useState(null)
 
+  
   // Custom Success Popup
   const [showSuccessPopup, setShowSuccessPopup] = useState(false)
   const [successMessage, setSuccessMessage] = useState({
@@ -167,6 +184,18 @@ function Dashboard({ activeView, setActiveView }) {
     setSuccessMessage({ title, message, details })
     setShowSuccessPopup(true)
   }
+
+  // Prevent body scroll when success popup is open
+  useEffect(() => {
+    if (showSuccessPopup) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = 'unset'
+    }
+    return () => {
+      document.body.style.overflow = 'unset'
+    }
+  }, [showSuccessPopup])
 
   // Loading state
   const [isLoading, setIsLoading] = useState(true)
@@ -201,6 +230,7 @@ function Dashboard({ activeView, setActiveView }) {
         setRegularCommissionRate(settingsData.regularCommissionRate || 20)
         setLateDeductionRate(settingsData.lateDeductionRate || 1)
         setMaxAbsencesForDayOff(settingsData.maxAbsencesForDayOff || 3)
+        setCustomCommissions(settingsData.customCommissions || [])
       }
 
       setIsLoading(false)
@@ -221,7 +251,8 @@ function Dashboard({ activeView, setActiveView }) {
             rushTarpCommissionRate,
             regularCommissionRate,
             lateDeductionRate,
-            maxAbsencesForDayOff
+            maxAbsencesForDayOff,
+            customCommissions
           })
         } catch (error) {
           console.error('Error saving settings:', error)
@@ -229,7 +260,7 @@ function Dashboard({ activeView, setActiveView }) {
       }
       saveSettings()
     }
-  }, [defaultHoursPerShift, rushTarpCommissionRate, regularCommissionRate, lateDeductionRate, maxAbsencesForDayOff, isLoading])
+  }, [defaultHoursPerShift, rushTarpCommissionRate, regularCommissionRate, lateDeductionRate, maxAbsencesForDayOff, customCommissions, isLoading])
 
   // Reset time entries when pay period changes
   const handlePayPeriodChange = (period) => {
@@ -376,6 +407,30 @@ function Dashboard({ activeView, setActiveView }) {
     }
   }
 
+  // Custom Commission Handlers
+  const handleAddCustomCommission = () => {
+    if (newCommissionName.trim() && newCommissionRate > 0) {
+      const newCommission = {
+        id: Date.now().toString(),
+        name: newCommissionName.trim(),
+        rate: Number(newCommissionRate)
+      }
+      setCustomCommissions([...customCommissions, newCommission])
+      setNewCommissionName('')
+      setNewCommissionRate(0)
+      showSuccess('Commission Added!', `${newCommission.name} commission has been added.`, [])
+    }
+  }
+
+  const handleDeleteCustomCommission = (id) => {
+    setCustomCommissions(customCommissions.filter(comm => comm.id !== id))
+    // Remove from counts
+    const newCounts = { ...customCommissionCounts }
+    delete newCounts[id]
+    setCustomCommissionCounts(newCounts)
+    showSuccess('Commission Deleted', 'Custom commission has been removed.', [])
+  }
+
   const handleOpenTimeTracker = (employee) => {
     setSelectedEmployee(employee)
     setShowTimeTracker(true)
@@ -384,6 +439,7 @@ function Dashboard({ activeView, setActiveView }) {
     setTimeEntries(initializeTimeEntries())
     setRushTarpCount(0)
     setRegularCommissionCount(0)
+    setCustomCommissionCounts({})
     setCashAdvance(0)
     setEditingPayrollRecordId(null)
   }
@@ -518,7 +574,17 @@ function Dashboard({ activeView, setActiveView }) {
     // Commissions (using settings values)
     const rushTarpCommission = rushTarpCount * rushTarpCommissionRate
     const regularCommission = regularCommissionCount * regularCommissionRate
-    const totalCommissions = rushTarpCommission + regularCommission
+    
+    // Calculate custom commissions
+    let customCommissionsTotal = 0
+    Object.keys(customCommissionCounts).forEach(commId => {
+      const commission = customCommissions.find(c => c.id === commId)
+      if (commission) {
+        customCommissionsTotal += customCommissionCounts[commId] * commission.rate
+      }
+    })
+    
+    const totalCommissions = rushTarpCommission + regularCommission + customCommissionsTotal
     
     // Calculate late minutes and deduction (using settings rate)
     const lateMinutes = calculateLateMinutes()
@@ -537,6 +603,7 @@ function Dashboard({ activeView, setActiveView }) {
       grossPay: grossPay.toFixed(2),
       rushTarpCommission: rushTarpCommission.toFixed(2),
       regularCommission: regularCommission.toFixed(2),
+      customCommissionsTotal: customCommissionsTotal.toFixed(2),
       totalCommissions: totalCommissions.toFixed(2),
       totalDeductions: totalDeductions.toFixed(2),
       netPay: netPay.toFixed(2),
@@ -671,12 +738,14 @@ function Dashboard({ activeView, setActiveView }) {
       timeEntries: { ...timeEntries },
       rushTarpCount: rushTarpCount,
       regularCommissionCount: regularCommissionCount,
+      customCommissionCounts: { ...customCommissionCounts },
       cashAdvance: cashAdvance,
         regularPay: earnings.regularPay,
         overtimePay: earnings.overtimePay,
         grossPay: earnings.grossPay,
         rushTarpCommission: earnings.rushTarpCommission,
         regularCommission: earnings.regularCommission,
+        customCommissionsTotal: earnings.customCommissionsTotal,
         totalCommissions: earnings.totalCommissions,
         totalDeductions: earnings.totalDeductions,
         netPay: earnings.netPay,
@@ -702,6 +771,7 @@ function Dashboard({ activeView, setActiveView }) {
     // Reset commissions and deductions
     setRushTarpCount(0)
     setRegularCommissionCount(0)
+    setCustomCommissionCounts({})
     setCashAdvance(0)
     
     // Reset time entries
@@ -757,6 +827,7 @@ function Dashboard({ activeView, setActiveView }) {
     // Set commissions and deductions
     setRushTarpCount(record.rushTarpCount || 0)
     setRegularCommissionCount(record.regularCommissionCount || 0)
+    setCustomCommissionCounts(record.customCommissionCounts || {})
     setCashAdvance(record.cashAdvance || 0)
     
     // Store the record ID for updating instead of creating new
@@ -2047,6 +2118,7 @@ function Dashboard({ activeView, setActiveView }) {
     )
   }
 
+
   if (activeView === 'salary') {
     return (
       <>
@@ -2079,7 +2151,7 @@ function Dashboard({ activeView, setActiveView }) {
                     </div>
                     <div className="dropdown-info">
                       <span className="dropdown-name">{employee.name}</span>
-                      <span className="dropdown-rate">{formatPeso(employee.ratePer9Hours)}/9hrs</span>
+                      <span className="dropdown-rate">{isManager ? formatPeso(employee.ratePer9Hours) : censorRate()}/9hrs</span>
                     </div>
                   </div>
                 ))}
@@ -2094,7 +2166,7 @@ function Dashboard({ activeView, setActiveView }) {
               </div>
               <div className="badge-info">
                 <span className="badge-name">{selectedEmployee.name}</span>
-                <span className="badge-rate">{formatPeso(selectedEmployee.ratePer9Hours)} per 9 hours</span>
+                <span className="badge-rate">{isManager ? formatPeso(selectedEmployee.ratePer9Hours) : censorRate()} per 9 hours</span>
               </div>
               <button className="clear-selection-btn" onClick={() => {
                 setSelectedEmployee(null)
@@ -2349,6 +2421,28 @@ function Dashboard({ activeView, setActiveView }) {
                         <span className="result-value">{formatPeso(regularCommissionCount * regularCommissionRate)}</span>
                       </div>
                     </div>
+                    
+                    {/* Custom Commissions */}
+                    {customCommissions.map(commission => (
+                      <div key={commission.id} className="commission-item">
+                        <label>{commission.name} (₱{commission.rate} each)</label>
+                        <div className="input-with-result">
+                          <input
+                            type="number"
+                            min="0"
+                            value={customCommissionCounts[commission.id] || 0}
+                            onChange={(e) => setCustomCommissionCounts({
+                              ...customCommissionCounts,
+                              [commission.id]: Number(e.target.value)
+                            })}
+                            className="commission-input"
+                            placeholder="0"
+                          />
+                          <span className="result-value">{formatPeso((customCommissionCounts[commission.id] || 0) * commission.rate)}</span>
+                        </div>
+                      </div>
+                    ))}
+                    
                     <div className="commission-total">
                       <span>Total Commissions:</span>
                       <strong>{formatPeso(calculateTotalEarnings().totalCommissions)}</strong>
@@ -2400,76 +2494,112 @@ function Dashboard({ activeView, setActiveView }) {
                 <div className="earnings-summary-container">
                   <h2>Earnings Breakdown</h2>
                   <div className="summary-content">
-                    <div className="summary-section">
-                      <div className="section-title">Work Hours</div>
-                      <div className="summary-row">
-                        <span>Regular Hours</span>
-                        <strong>{calculateTotalEarnings().regularHours} hrs</strong>
-                      </div>
-                      <div className="summary-row">
-                        <span>Overtime Hours</span>
-                        <strong>{calculateTotalEarnings().totalOvertimeHours} hrs</strong>
-                      </div>
-                      {parseFloat(calculateTotalEarnings().dayOffHours) > 0 && (
-                        <div className="summary-row day-off-row">
-                          <span>Day Off Hours (Paid)</span>
-                          <strong>+{calculateTotalEarnings().dayOffHours} hrs</strong>
+                    {isManager ? (
+                      <>
+                        <div className="summary-section">
+                          <div className="section-title">Work Hours</div>
+                          <div className="summary-row">
+                            <span>Regular Hours</span>
+                            <strong>{calculateTotalEarnings().regularHours} hrs</strong>
+                          </div>
+                          <div className="summary-row">
+                            <span>Overtime Hours</span>
+                            <strong>{calculateTotalEarnings().totalOvertimeHours} hrs</strong>
+                          </div>
+                          {parseFloat(calculateTotalEarnings().dayOffHours) > 0 && (
+                            <div className="summary-row day-off-row">
+                              <span>Day Off Hours (Paid)</span>
+                              <strong>+{calculateTotalEarnings().dayOffHours} hrs</strong>
+                            </div>
+                          )}
+                          <div className="summary-row highlight">
+                            <span>Total Hours</span>
+                            <strong>{calculateTotalEarnings().totalHours} hrs</strong>
+                          </div>
                         </div>
-                      )}
-                      <div className="summary-row highlight">
-                        <span>Total Hours</span>
-                        <strong>{calculateTotalEarnings().totalHours} hrs</strong>
-                      </div>
-                    </div>
 
-                    <div className="summary-section">
-                      <div className="section-title">Base Earnings</div>
-                      <div className="summary-row">
-                        <span>Regular Pay</span>
-                        <strong>{formatPeso(calculateTotalEarnings().regularPay)}</strong>
-                      </div>
-                      <div className="summary-row">
-                        <span>Overtime Pay</span>
-                        <strong>{formatPeso(calculateTotalEarnings().overtimePay)}</strong>
-                      </div>
-                      <div className="summary-row highlight">
-                        <span>Gross Pay</span>
-                        <strong>{formatPeso(calculateTotalEarnings().grossPay)}</strong>
-                      </div>
-                    </div>
-
-                    <div className="summary-section">
-                      <div className="section-title">Additions</div>
-                      <div className="summary-row positive">
-                        <span>Commissions</span>
-                        <strong>+{formatPeso(calculateTotalEarnings().totalCommissions)}</strong>
-                      </div>
-                    </div>
-
-                    <div className="summary-section">
-                      <div className="section-title">Deductions</div>
-                      {cashAdvance > 0 && (
-                        <div className="summary-row negative">
-                          <span>Cash Advance</span>
-                          <strong>-{formatPeso(cashAdvance)}</strong>
+                        <div className="summary-section">
+                          <div className="section-title">Base Earnings</div>
+                          <div className="summary-row">
+                            <span>Regular Pay</span>
+                            <strong>{formatPeso(calculateTotalEarnings().regularPay)}</strong>
+                          </div>
+                          <div className="summary-row">
+                            <span>Overtime Pay</span>
+                            <strong>{formatPeso(calculateTotalEarnings().overtimePay)}</strong>
+                          </div>
+                          <div className="summary-row highlight">
+                            <span>Gross Pay</span>
+                            <strong>{formatPeso(calculateTotalEarnings().grossPay)}</strong>
+                          </div>
                         </div>
-                      )}
-                      {calculateTotalEarnings().lateMinutes > 0 && (
-                        <div className="summary-row negative">
-                          <span>Late ({calculateTotalEarnings().lateMinutes} min @ ₱{lateDeductionRate}/min)</span>
-                          <strong>-{formatPeso(calculateTotalEarnings().lateDeduction)}</strong>
-                        </div>
-                      )}
-                      <div className="summary-row highlight negative">
-                        <span>Total Deductions</span>
-                        <strong>-{formatPeso(calculateTotalEarnings().totalDeductions)}</strong>
-                      </div>
-                    </div>
 
-                    <div className="summary-net-pay">
-                      <span>NET PAY</span>
-                      <strong>{formatPeso(calculateTotalEarnings().netPay)}</strong>
-                    </div>
+                        <div className="summary-section">
+                          <div className="section-title">Additions</div>
+                          {rushTarpCount > 0 && (
+                            <div className="summary-row positive">
+                              <span>Rush Tarp ({rushTarpCount} × ₱{rushTarpCommissionRate})</span>
+                              <strong>+{formatPeso(rushTarpCount * rushTarpCommissionRate)}</strong>
+                            </div>
+                          )}
+                          {regularCommissionCount > 0 && (
+                            <div className="summary-row positive">
+                              <span>Regular ({regularCommissionCount} × ₱{regularCommissionRate})</span>
+                              <strong>+{formatPeso(regularCommissionCount * regularCommissionRate)}</strong>
+                            </div>
+                          )}
+                          {customCommissions.map(commission => {
+                            const count = customCommissionCounts[commission.id] || 0
+                            if (count > 0) {
+                              return (
+                                <div key={commission.id} className="summary-row positive">
+                                  <span>{commission.name} ({count} × ₱{commission.rate})</span>
+                                  <strong>+{formatPeso(count * commission.rate)}</strong>
+                                </div>
+                              )
+                            }
+                            return null
+                          })}
+                          <div className="summary-row highlight positive">
+                            <span>Total Commissions</span>
+                            <strong>+{formatPeso(calculateTotalEarnings().totalCommissions)}</strong>
+                          </div>
+                        </div>
+
+                        <div className="summary-section">
+                          <div className="section-title">Deductions</div>
+                          {cashAdvance > 0 && (
+                            <div className="summary-row negative">
+                              <span>Cash Advance</span>
+                              <strong>-{formatPeso(cashAdvance)}</strong>
+                            </div>
+                          )}
+                          {calculateTotalEarnings().lateMinutes > 0 && (
+                            <div className="summary-row negative">
+                              <span>Late ({calculateTotalEarnings().lateMinutes} min @ ₱{lateDeductionRate}/min)</span>
+                              <strong>-{formatPeso(calculateTotalEarnings().lateDeduction)}</strong>
+                            </div>
+                          )}
+                          <div className="summary-row highlight negative">
+                            <span>Total Deductions</span>
+                            <strong>-{formatPeso(calculateTotalEarnings().totalDeductions)}</strong>
+                          </div>
+                        </div>
+
+                        <div className="summary-net-pay">
+                          <span>NET PAY</span>
+                          <strong>{formatPeso(calculateTotalEarnings().netPay)}</strong>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="accountant-net-pay-only">
+                        <div className="summary-net-pay">
+                          <span>NET PAY</span>
+                          <strong>{formatPeso(calculateTotalEarnings().netPay)}</strong>
+                        </div>
+                        <p className="restricted-notice">Full breakdown restricted to Manager access</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </>
@@ -4124,6 +4254,105 @@ function Dashboard({ activeView, setActiveView }) {
                 </div>
               </div>
             </div>
+
+            {/* Custom Commissions */}
+            <div style={{ marginTop: '30px' }}>
+              <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#ffffff', marginBottom: '16px' }}>Custom Commission Types</h3>
+              
+              {/* Add Custom Commission Form */}
+              <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+                <input
+                  type="text"
+                  placeholder="Commission Name"
+                  value={newCommissionName}
+                  onChange={(e) => setNewCommissionName(e.target.value)}
+                  style={{
+                    flex: 2,
+                    padding: '10px 12px',
+                    background: '#0a0a0a',
+                    border: '1px solid #2a2a2a',
+                    borderRadius: '8px',
+                    color: '#ffffff',
+                    fontSize: '14px'
+                  }}
+                />
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: '8px', padding: '0 12px' }}>
+                  <span style={{ color: '#999999', marginRight: '8px' }}>₱</span>
+                  <input
+                    type="number"
+                    placeholder="Rate"
+                    value={newCommissionRate || ''}
+                    onChange={(e) => setNewCommissionRate(Number(e.target.value))}
+                    min="0"
+                    step="0.01"
+                    style={{
+                      flex: 1,
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#ffffff',
+                      fontSize: '14px',
+                      outline: 'none',
+                      MozAppearance: 'textfield',
+                      WebkitAppearance: 'none',
+                      appearance: 'none'
+                    }}
+                    onWheel={(e) => e.target.blur()}
+                  />
+                </div>
+                <button
+                  onClick={handleAddCustomCommission}
+                  style={{
+                    padding: '10px 20px',
+                    background: '#ffffff',
+                    color: '#0a0a0a',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Plus size={16} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
+                  Add
+                </button>
+              </div>
+
+              {/* Custom Commissions List */}
+              {customCommissions.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {customCommissions.map(commission => (
+                    <div key={commission.id} style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '12px 16px',
+                      background: '#1a1a1a',
+                      border: '1px solid #2a2a2a',
+                      borderRadius: '8px'
+                    }}>
+                      <div>
+                        <span style={{ color: '#ffffff', fontSize: '14px', fontWeight: '500' }}>{commission.name}</span>
+                        <span style={{ color: '#999999', fontSize: '13px', marginLeft: '12px' }}>₱{commission.rate} each</span>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteCustomCommission(commission.id)}
+                        style={{
+                          padding: '6px 12px',
+                          background: 'transparent',
+                          border: '1px solid #ff6b6b',
+                          color: '#ff6b6b',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <Trash2 size={14} style={{ verticalAlign: 'middle' }} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Day Off Settings */}
@@ -4152,10 +4381,12 @@ function Dashboard({ activeView, setActiveView }) {
           <div className="settings-section">
             <div className="section-header-with-action">
               <h2>Employee Management</h2>
-              <button className="add-employee-button" onClick={() => setShowAddModal(true)}>
-                <Plus size={20} />
-                <span>Add Employee</span>
-              </button>
+              {isManager && (
+                <button className="add-employee-button" onClick={() => setShowAddModal(true)}>
+                  <Plus size={20} />
+                  <span>Add Employee</span>
+                </button>
+              )}
                               </div>
 
             {employees.length === 0 ? (
@@ -4188,7 +4419,7 @@ function Dashboard({ activeView, setActiveView }) {
                             <span>{employee.name}</span>
                                 </div>
                         </td>
-                        <td>{formatPeso(employee.ratePer9Hours)}</td>
+                        <td>{isManager ? formatPeso(employee.ratePer9Hours) : censorRate()}</td>
                         <td>{employee.hoursPerShift} hrs</td>
                         <td>
                           <span className={`shift-badge ${employee.shiftType}`}>
@@ -4198,20 +4429,27 @@ function Dashboard({ activeView, setActiveView }) {
                         <td>{employee.shiftType === 'first' ? '7:00 AM - 5:00 PM' : '8:30 PM - 7:00 AM'}</td>
                         <td>
                           <div className="action-buttons">
+                            {isManager && (
+                              <>
+                                <button 
+                                className="icon-btn edit-btn"
+                                onClick={() => handleEditEmployee(employee)}
+                                title="Edit"
+                              >
+                                <Edit2 size={16} />
+                                </button>
                               <button 
-                              className="icon-btn edit-btn"
-                              onClick={() => handleEditEmployee(employee)}
-                              title="Edit"
-                            >
-                              <Edit2 size={16} />
+                                className="icon-btn delete-btn"
+                                onClick={() => handleDeleteEmployee(employee.id)}
+                                title="Delete"
+                              >
+                                <Trash2 size={16} />
                               </button>
-                            <button 
-                              className="icon-btn delete-btn"
-                              onClick={() => handleDeleteEmployee(employee.id)}
-                              title="Delete"
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                              </>
+                            )}
+                            {!isManager && (
+                              <span className="no-access-badge">View Only</span>
+                            )}
                               </div>
                         </td>
                       </tr>
@@ -4322,10 +4560,12 @@ function Dashboard({ activeView, setActiveView }) {
           <h1>Employee Salary Dashboard</h1>
           <p className="subtitle">Manage employee rates and calculate earnings (9-hour shifts)</p>
         </div>
-        <button className="add-employee-button" onClick={() => setShowAddModal(true)}>
-          <Plus size={20} />
-          <span>Add Employee</span>
-        </button>
+        {isManager && (
+          <button className="add-employee-button" onClick={() => setShowAddModal(true)}>
+            <Plus size={20} />
+            <span>Add Employee</span>
+          </button>
+        )}
       </div>
 
       <div className="stats-grid">
@@ -4345,7 +4585,7 @@ function Dashboard({ activeView, setActiveView }) {
           </div>
           <div className="stat-content">
             <span className="stat-label">Avg. Per Shift (9hrs)</span>
-            <span className="stat-value">{formatPeso(stats.avgPerShift)}</span>
+            <span className="stat-value">{isManager ? formatPeso(stats.avgPerShift) : censorRate()}</span>
           </div>
         </div>
 
@@ -4355,7 +4595,7 @@ function Dashboard({ activeView, setActiveView }) {
           </div>
           <div className="stat-content">
             <span className="stat-label">Total Monthly</span>
-            <span className="stat-value">{formatPeso(stats.totalMonthly)}</span>
+            <span className="stat-value">{isManager ? formatPeso(stats.totalMonthly) : censorRate()}</span>
           </div>
         </div>
 
@@ -4365,7 +4605,7 @@ function Dashboard({ activeView, setActiveView }) {
           </div>
           <div className="stat-content">
             <span className="stat-label">Total Annual</span>
-            <span className="stat-value">{formatPeso(stats.totalAnnual)}</span>
+            <span className="stat-value">{isManager ? formatPeso(stats.totalAnnual) : censorRate()}</span>
           </div>
         </div>
       </div>
@@ -4385,27 +4625,29 @@ function Dashboard({ activeView, setActiveView }) {
                     <h3>{employee.name}</h3>
                     <span className="employee-hours">{employee.hoursPerShift} hours/shift</span>
                   </div>
-                  <div className="employee-actions">
-                    <button 
-                      className="icon-btn edit-btn"
-                      onClick={() => handleEditEmployee(employee)}
-                      title="Edit"
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    <button 
-                      className="icon-btn delete-btn"
-                      onClick={() => handleDeleteEmployee(employee.id)}
-                      title="Delete"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
+                  {isManager && (
+                    <div className="employee-actions">
+                      <button 
+                        className="icon-btn edit-btn"
+                        onClick={() => handleEditEmployee(employee)}
+                        title="Edit"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button 
+                        className="icon-btn delete-btn"
+                        onClick={() => handleDeleteEmployee(employee.id)}
+                        title="Delete"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="employee-rate">
                   <span className="rate-label">Per 9-Hour Shift</span>
-                  <span className="rate-value">{formatPeso(employee.ratePer9Hours)}</span>
+                  <span className="rate-value">{isManager ? formatPeso(employee.ratePer9Hours) : censorRate()}</span>
                 </div>
 
                 <div className="employee-stats">

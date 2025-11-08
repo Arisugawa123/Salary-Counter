@@ -1,6 +1,6 @@
-# Salary Counter Dashboard
+# IRONWOLF SHOP SYSTEM v1.2.1
 
-A modern, sleek black and white tech-themed salary tracking dashboard built with React and Vite.
+A comprehensive point-of-sale and shop management system with cashier dashboard, order tracking, and payment processing built with React and Vite.
 
 ## Features
 
