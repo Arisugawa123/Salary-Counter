@@ -4,6 +4,7 @@ import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import Dashboard from './components/Dashboard'
 import CashierDashboard from './components/CashierDashboard'
+import GraphicArtistDashboard from './components/GraphicArtistDashboard'
 import Login from './components/Login'
 import './App.css'
 
@@ -38,6 +39,11 @@ function AppContent() {
         </div>
       </div>
     )
+  }
+
+  // Graphic Artist gets a custom dashboard
+  if (user?.role === 'graphic-artist') {
+    return <GraphicArtistDashboard user={user} />
   }
 
   // Regular dashboard for accountant and manager

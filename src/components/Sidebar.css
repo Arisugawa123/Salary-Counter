@@ -80,7 +80,6 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
 }
 
 .menu-list {
@@ -124,6 +123,15 @@
   height: 1px;
   background: #222222;
   margin: 20px 15px;
+}
+
+.sidebar-category {
+  padding: 12px 30px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #666666;
 }
 
 /* Scrollbar styling */

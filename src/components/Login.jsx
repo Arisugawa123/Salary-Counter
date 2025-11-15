@@ -1,16 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { UserCheck, Shield, Lock, CheckCircle, Key, Eye, DollarSign, Sparkles, TrendingUp, Users, Calendar, Clock, Play, X } from 'lucide-react'
+import { UserCheck, Shield, Lock, CheckCircle, Key, Eye, DollarSign, Sparkles, TrendingUp, Users, Calendar, Clock, Play, X, Palette } from 'lucide-react'
 import './Login.css'
 
 const Login = () => {
   const { login } = useAuth()
   const [selectedRole, setSelectedRole] = useState(null)
   const [managerCode, setManagerCode] = useState('')
+  const [employeeName, setEmployeeName] = useState('')
+  const [employeeAccessCode, setEmployeeAccessCode] = useState('')
   const [error, setError] = useState('')
   const [isAnimating, setIsAnimating] = useState(false)
   const [isExiting, setIsExiting] = useState(false)
   const [showAccessCode, setShowAccessCode] = useState(false)
+  const [showEmployeeFields, setShowEmployeeFields] = useState(false)
   
   // Trailer carousel state
   const [activeTrailer, setActiveTrailer] = useState(null) // null = show thumbnails, 0 = yotei, 1 = battlefield, 2 = gta6
@@ -109,6 +112,12 @@ const Login = () => {
       icon: DollarSign
     },
     {
+      id: 'graphic-artist',
+      title: 'Graphic Artist',
+      description: 'Create and manage visual content',
+      icon: Palette
+    },
+    {
       id: 'manager',
       title: 'Manager',
       description: 'Manage employees and approve records',
@@ -127,22 +136,49 @@ const Login = () => {
         setSelectedRole(roleId)
         setManagerCode('')
         setError('')
+        
+        // Show employee fields for graphic artist
+        if (roleId === 'graphic-artist') {
+          setShowEmployeeFields(true)
+        }
       }, 400) // Match the slideUp animation duration
+    } else if (selectedRole === 'graphic-artist' && roleId !== 'graphic-artist' && showEmployeeFields) {
+      setIsExiting(true)
+      setTimeout(() => {
+        setShowEmployeeFields(false)
+        setIsExiting(false)
+        setSelectedRole(roleId)
+        setEmployeeName('')
+        setEmployeeAccessCode('')
+        setError('')
+        
+        // Show access code field for manager
+        if (roleId === 'manager') {
+          setShowAccessCode(true)
+        }
+      }, 400)
     } else {
       setSelectedRole(roleId)
       setError('')
       setManagerCode('')
+      setEmployeeName('')
+      setEmployeeAccessCode('')
       
       // Show access code field for manager
       if (roleId === 'manager') {
         setShowAccessCode(true)
+        setShowEmployeeFields(false)
+      } else if (roleId === 'graphic-artist') {
+        setShowEmployeeFields(true)
+        setShowAccessCode(false)
       } else {
         setShowAccessCode(false)
+        setShowEmployeeFields(false)
       }
     }
   }
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!selectedRole) {
       setError('Please select a role')
       return
@@ -156,6 +192,36 @@ const Login = () => {
       }
     }
 
+    // Check graphic artist credentials
+    if (selectedRole === 'graphic-artist') {
+      if (!employeeName.trim()) {
+        setError('Please enter your name')
+        return
+      }
+      if (!employeeAccessCode.trim()) {
+        setError('Please enter your access code')
+        return
+      }
+      
+      // Verify credentials from database
+      const { supabase } = await import('../lib/supabase')
+      const { data, error: dbError } = await supabase
+        .from('employees')
+        .select('name, access_code')
+        .ilike('name', employeeName.trim())
+        .single()
+      
+      if (dbError || !data) {
+        setError('Employee not found')
+        return
+      }
+      
+      if (data.access_code !== employeeAccessCode.trim()) {
+        setError('Invalid access code')
+        return
+      }
+    }
+
     // Successful login
     setIsAnimating(true)
     setTimeout(() => {
@@ -163,6 +229,7 @@ const Login = () => {
       login({
         role: selectedRole,
         roleTitle: role.title,
+        employeeName: selectedRole === 'graphic-artist' ? employeeName.trim() : undefined,
         loginTime: new Date().toISOString()
       })
     }, 600)
@@ -212,7 +279,6 @@ const Login = () => {
                 </div>
                 <div className="role-content">
                   <h3>{role.title}</h3>
-                  <p>{role.description}</p>
                 </div>
                 {isSelected && (
                   <div className="selected-indicator">
@@ -247,6 +313,45 @@ const Login = () => {
           </div>
         )}
 
+        {showEmployeeFields && (
+          <div className={`access-code-section ${isExiting ? 'exiting' : ''}`}>
+            <label htmlFor="employeeName">
+              <Palette size={16} />
+              Employee Name
+            </label>
+            <div className="input-wrapper">
+              <input
+                id="employeeName"
+                type="text"
+                value={employeeName}
+                onChange={(e) => setEmployeeName(e.target.value)}
+                autoFocus
+              />
+              <span className={`custom-placeholder ${employeeName ? 'hidden' : ''}`}>
+                Enter your name
+              </span>
+            </div>
+            
+            <label htmlFor="employeeAccessCode" style={{ marginTop: '16px' }}>
+              <Key size={16} />
+              Access Code
+            </label>
+            <div className="input-wrapper">
+              <input
+                id="employeeAccessCode"
+                type="password"
+                value={employeeAccessCode}
+                onChange={(e) => setEmployeeAccessCode(e.target.value)}
+                onKeyPress={handleKeyPress}
+                maxLength="10"
+              />
+              <span className={`custom-placeholder ${employeeAccessCode ? 'hidden' : ''}`}>
+                Enter your access code
+              </span>
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="error-message">
             {error}
@@ -256,7 +361,7 @@ const Login = () => {
         <button
           className="login-button"
           onClick={handleLogin}
-          disabled={!selectedRole || (selectedRole === 'manager' && !managerCode)}
+          disabled={!selectedRole || (selectedRole === 'manager' && !managerCode) || (selectedRole === 'graphic-artist' && (!employeeName || !employeeAccessCode))}
         >
           {isAnimating ? (
             <span className="button-loading">Logging in...</span>

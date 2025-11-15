@@ -11,7 +11,7 @@ import {
 import { useAuth } from '../contexts/AuthContext'
 import './Sidebar.css'
 
-function Sidebar({ isOpen, setIsOpen, activeView, setActiveView }) {
+function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, sublimationItems, currentView, onMenuClick }) {
   const { user } = useAuth()
   const isManager = user?.role === 'manager'
   const [showAccessModal, setShowAccessModal] = useState(false)
@@ -19,6 +19,9 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView }) {
   const [accessError, setAccessError] = useState('')
 
   const MANAGER_ACCESS_CODE = '050123'
+  
+  // Use custom menu items if provided, otherwise use default
+  const useCustomMenu = menuItems !== undefined
 
   useEffect(() => {
     if (showAccessModal) {
@@ -58,7 +61,7 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView }) {
       handleAccessSubmit()
     }
   }
-  const menuItems = [
+  const defaultMenuItems = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { id: 'salary', icon: DollarSign, label: 'Salary Counter' },
     ...(isManager ? [{ id: 'payroll', icon: Wallet, label: 'Payroll' }] : []),
@@ -69,6 +72,10 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView }) {
   const bottomItems = [
     { id: 'settings', icon: Settings, label: 'Settings' },
   ]
+  
+  const finalMenuItems = useCustomMenu ? menuItems : defaultMenuItems
+  const finalActiveView = useCustomMenu ? currentView : activeView
+  const finalSetActiveView = useCustomMenu ? onMenuClick : setActiveView
 
   return (
     <aside className={`sidebar ${isOpen ? 'open' : 'closed'}`}>
@@ -77,7 +84,7 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView }) {
           <div className="logo-icon">
             <DollarSign size={24} />
           </div>
-          {isOpen && <span className="logo-text">SalaryTrack</span>}
+          {isOpen && <span className="logo-text">IRONWOLF</span>}
         </div>
         <button 
           className="toggle-button"
@@ -89,11 +96,11 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView }) {
 
       <nav className="sidebar-nav">
         <ul className="menu-list">
-          {menuItems.map(item => (
+          {finalMenuItems.map(item => (
             <li key={item.id}>
               <button
-                className={`menu-item ${activeView === item.id ? 'active' : ''}`}
-                onClick={() => setActiveView(item.id)}
+                className={`menu-item ${finalActiveView === item.id ? 'active' : ''}`}
+                onClick={() => finalSetActiveView(item.id)}
                 title={!isOpen ? item.label : ''}
               >
                 <item.icon size={20} />
@@ -103,22 +110,46 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView }) {
           ))}
         </ul>
 
-        <div className="sidebar-divider"></div>
+        {sublimationItems && sublimationItems.length > 0 && (
+          <>
+            <div className="sidebar-divider"></div>
+            {isOpen && <div className="sidebar-category">Sublimation Exclusive</div>}
+            <ul className="menu-list">
+              {sublimationItems.map(item => (
+                <li key={item.id}>
+                  <button
+                    className={`menu-item ${finalActiveView === item.id ? 'active' : ''}`}
+                    onClick={() => finalSetActiveView(item.id)}
+                    title={!isOpen ? item.label : ''}
+                  >
+                    <item.icon size={20} />
+                    {isOpen && <span>{item.label}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
 
-        <ul className="menu-list">
-          {bottomItems.map(item => (
-            <li key={item.id}>
-              <button
-                className={`menu-item ${activeView === item.id ? 'active' : ''}`}
-                onClick={() => item.id === 'settings' ? handleSettingsClick() : setActiveView(item.id)}
-                title={!isOpen ? item.label : ''}
-              >
-                <item.icon size={20} />
-                {isOpen && <span>{item.label}</span>}
-              </button>
-            </li>
-          ))}
-        </ul>
+        {!useCustomMenu && (
+          <>
+            <div className="sidebar-divider"></div>
+            <ul className="menu-list">
+              {bottomItems.map(item => (
+                <li key={item.id}>
+                  <button
+                    className={`menu-item ${finalActiveView === item.id ? 'active' : ''}`}
+                    onClick={() => item.id === 'settings' ? handleSettingsClick() : finalSetActiveView(item.id)}
+                    title={!isOpen ? item.label : ''}
+                  >
+                    <item.icon size={20} />
+                    {isOpen && <span>{item.label}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </nav>
 
       {showAccessModal && (
