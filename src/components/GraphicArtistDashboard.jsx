@@ -36,7 +36,9 @@ import {
   MessageSquare,
   Users,
   Wallet,
-  DollarSign
+  DollarSign,
+  AlertCircle,
+  Briefcase
 } from 'lucide-react'
 import './GraphicArtistDashboard.css'
 
@@ -315,6 +317,229 @@ function CreateOrderView() {
     paymentMethod: 'Cash',
     downPayment: ''
   })
+  const [sublimationData, setSublimationData] = useState({
+    customerName: '',
+    contactNumber: '',
+    email: '',
+    address: '',
+    businessName: '',
+    pickupDate: '',
+    priorityLevel: 'Normal',
+    productCategory: '',
+    deliveryMethod: 'Pickup',
+    assignedArtist: '',
+    productType: '',
+    size: '',
+    quantity: '1',
+    designNotes: '',
+    rushOrder: false,
+    paymentMethod: 'Cash',
+    downPayment: ''
+  })
+  const [showCalendar, setShowCalendar] = useState(false)
+  const [selectedDate, setSelectedDate] = useState(null)
+  const [currentMonth, setCurrentMonth] = useState(new Date())
+  const [artistSearch, setArtistSearch] = useState('')
+  const [showArtistDropdown, setShowArtistDropdown] = useState(false)
+  const [cartItems, setCartItems] = useState([])
+  const [cartIdCounter, setCartIdCounter] = useState(1)
+  const [showProductSelection, setShowProductSelection] = useState(false)
+  const [productSelectionData, setProductSelectionData] = useState({
+    productType: '',
+    sizes: {
+      XS: 0,
+      S: 0,
+      M: 0,
+      L: 0,
+      XL: 0,
+      '2XL': 0,
+      '3XL': 0
+    },
+    customSizes: []
+  })
+  
+  // Mock artist data with availability status
+  const availableArtists = [
+    { id: 1, name: 'Artist 1', status: 'Available', workload: 3 },
+    { id: 2, name: 'Artist 2', status: 'Available', workload: 5 },
+    { id: 3, name: 'Artist 3', status: 'Not Available', workload: 8 },
+    { id: 4, name: 'Artist 4', status: 'Available', workload: 2 },
+    { id: 5, name: 'John Martinez', status: 'Available', workload: 4 },
+    { id: 6, name: 'Maria Santos', status: 'Not Available', workload: 7 },
+    { id: 7, name: 'Carlos Rivera', status: 'Available', workload: 1 },
+  ]
+  
+  const filteredArtists = availableArtists.filter(artist =>
+    artist.name.toLowerCase().includes(artistSearch.toLowerCase())
+  )
+  
+  const handleArtistSelect = (artistName) => {
+    handleSublimationInputChange('assignedArtist', artistName)
+    setArtistSearch(artistName)
+    setShowArtistDropdown(false)
+  }
+  
+  const getArtistStatus = (artistName) => {
+    const artist = availableArtists.find(a => a.name === artistName)
+    return artist ? artist.status : 'Unknown'
+  }
+
+  const handleAddToCart = () => {
+    if (!sublimationData.productType || !sublimationData.size || !sublimationData.quantity) {
+      alert('Please fill in Product Type, Size, and Quantity')
+      return
+    }
+
+    const newItem = {
+      id: cartIdCounter,
+      productType: sublimationData.productType,
+      size: sublimationData.size,
+      quantity: parseInt(sublimationData.quantity),
+      assignedArtist: sublimationData.assignedArtist || 'Not Assigned'
+    }
+
+    setCartItems([...cartItems, newItem])
+    setCartIdCounter(cartIdCounter + 1)
+    
+    // Clear product fields
+    setSublimationData(prev => ({
+      ...prev,
+      productType: '',
+      size: '',
+      quantity: '1'
+    }))
+  }
+
+  const handleClearCart = () => {
+    if (window.confirm('Are you sure you want to clear all items from the cart?')) {
+      setCartItems([])
+      setCartIdCounter(1)
+    }
+  }
+
+  const handleRemoveFromCart = (itemId) => {
+    setCartItems(cartItems.filter(item => item.id !== itemId))
+  }
+
+  const handleShowProductSelection = () => {
+    setShowProductSelection(true)
+  }
+
+  const handleCancelProductSelection = () => {
+    setShowProductSelection(false)
+    setProductSelectionData({
+      productType: '',
+      sizes: {
+        XS: 0,
+        S: 0,
+        M: 0,
+        L: 0,
+        XL: 0,
+        '2XL': 0,
+        '3XL': 0
+      },
+      customSizes: []
+    })
+  }
+
+  const handleProductTypeChange = (value) => {
+    setProductSelectionData(prev => ({ ...prev, productType: value }))
+  }
+
+  const handleSizeQuantityChange = (size, quantity) => {
+    setProductSelectionData(prev => ({
+      ...prev,
+      sizes: {
+        ...prev.sizes,
+        [size]: parseInt(quantity) || 0
+      }
+    }))
+  }
+
+  const handleAddCustomSize = () => {
+    setProductSelectionData(prev => ({
+      ...prev,
+      customSizes: [...prev.customSizes, { size: '', quantity: 0 }]
+    }))
+  }
+
+  const handleCustomSizeChange = (index, field, value) => {
+    const newCustomSizes = [...productSelectionData.customSizes]
+    newCustomSizes[index][field] = field === 'quantity' ? (parseInt(value) || 0) : value
+    setProductSelectionData(prev => ({ ...prev, customSizes: newCustomSizes }))
+  }
+
+  const handleRemoveCustomSize = (index) => {
+    setProductSelectionData(prev => ({
+      ...prev,
+      customSizes: prev.customSizes.filter((_, i) => i !== index)
+    }))
+  }
+
+  const handleAddProductToCart = () => {
+    if (!productSelectionData.productType) {
+      alert('Please enter product type')
+      return
+    }
+
+    // Add standard sizes to cart
+    Object.entries(productSelectionData.sizes).forEach(([size, quantity]) => {
+      if (quantity > 0) {
+        const newItem = {
+          id: cartIdCounter,
+          productType: productSelectionData.productType,
+          size: size,
+          quantity: quantity,
+          assignedArtist: sublimationData.assignedArtist || 'Not Assigned'
+        }
+        setCartItems(prev => [...prev, newItem])
+        setCartIdCounter(prev => prev + 1)
+      }
+    })
+
+    // Add custom sizes to cart
+    productSelectionData.customSizes.forEach(({ size, quantity }) => {
+      if (size && quantity > 0) {
+        const newItem = {
+          id: cartIdCounter,
+          productType: productSelectionData.productType,
+          size: size,
+          quantity: quantity,
+          assignedArtist: sublimationData.assignedArtist || 'Not Assigned'
+        }
+        setCartItems(prev => [...prev, newItem])
+        setCartIdCounter(prev => prev + 1)
+      }
+    })
+
+    // Reset and go back to cart view
+    handleCancelProductSelection()
+  }
+
+  const handleDateSelect = (date) => {
+    setSelectedDate(date)
+    handleSublimationInputChange('pickupDate', date.toISOString().split('T')[0])
+    setShowCalendar(false)
+  }
+
+  const getDaysInMonth = (date) => {
+    const year = date.getFullYear()
+    const month = date.getMonth()
+    const firstDay = new Date(year, month, 1)
+    const lastDay = new Date(year, month + 1, 0)
+    const daysInMonth = lastDay.getDate()
+    const startingDayOfWeek = firstDay.getDay()
+    
+    return { daysInMonth, startingDayOfWeek, year, month }
+  }
+
+  const changeMonth = (direction) => {
+    setCurrentMonth(prev => {
+      const newDate = new Date(prev)
+      newDate.setMonth(prev.getMonth() + direction)
+      return newDate
+    })
+  }
 
   const handleTypeSelect = (type) => {
     setOrderType(type)
@@ -364,6 +589,10 @@ function CreateOrderView() {
     setTarpaulinData(prev => ({ ...prev, [field]: value }))
   }
 
+  const handleSublimationInputChange = (field, value) => {
+    setSublimationData(prev => ({ ...prev, [field]: value }))
+  }
+
   const handleProblemToggle = (problem) => {
     setRepairData(prev => ({
       ...prev,
@@ -374,7 +603,7 @@ function CreateOrderView() {
   }
 
   const handleNextStep = () => {
-    const maxStep = orderType === 'Tarpaulin' ? 4 : 3
+    const maxStep = orderType === 'Tarpaulin' || orderType === 'Sublimation' ? 4 : 3
     if (step < maxStep) {
       setStep(step + 1)
     }
@@ -635,6 +864,13 @@ function CreateOrderView() {
         { number: 3, title: 'Order Details', description: 'Size & design' },
         { number: 4, title: 'Payment', description: 'Review & pay' }
       ]
+    : orderType === 'Sublimation'
+    ? [
+        { number: 1, title: 'Select Type', description: 'Choose product category' },
+        { number: 2, title: 'Customer Info', description: 'Enter details' },
+        { number: 3, title: 'Order Details', description: 'Product info' },
+        { number: 4, title: 'Payment', description: 'Review & pay' }
+      ]
     : [
         { number: 1, title: 'Select Type', description: 'Choose product category' },
         { number: 2, title: 'Order Details', description: 'Enter information' },
@@ -661,21 +897,27 @@ function CreateOrderView() {
                 {step === 1 && 'Create New Order'}
                 {step === 2 && orderType === 'Repairs' && 'Customer & Device Details'}
                 {step === 2 && orderType === 'Tarpaulin' && 'Customer Information'}
-                {step === 2 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && `${orderType} - Order Details`}
+                {step === 2 && orderType === 'Sublimation' && 'Customer Information'}
+                {step === 2 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && orderType !== 'Sublimation' && `${orderType} - Order Details`}
                 {step === 3 && orderType === 'Repairs' && 'Problem Checklist'}
                 {step === 3 && orderType === 'Tarpaulin' && 'Tarpaulin Order Details'}
-                {step === 3 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && 'Review Order'}
+                {step === 3 && orderType === 'Sublimation' && 'Graphic Artist Selection'}
+                {step === 3 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && orderType !== 'Sublimation' && 'Review Order'}
                 {step === 4 && orderType === 'Tarpaulin' && 'Review & Payment'}
+                {step === 4 && orderType === 'Sublimation' && 'Order Cart'}
               </h1>
               <p>
                 {step === 1 && 'Select the product category that best fits your project needs'}
                 {step === 2 && orderType === 'Repairs' && 'Enter customer information and device details'}
                 {step === 2 && orderType === 'Tarpaulin' && 'Enter customer contact information'}
-                {step === 2 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && `Provide the necessary information for your ${orderType.toLowerCase()} order`}
+                {step === 2 && orderType === 'Sublimation' && 'Enter customer contact information'}
+                {step === 2 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && orderType !== 'Sublimation' && `Provide the necessary information for your ${orderType.toLowerCase()} order`}
                 {step === 3 && orderType === 'Repairs' && 'Check all issues reported by the customer'}
-                {step === 3 && orderType === 'Tarpaulin' && 'Specify size, orientation, and design details'}
-                {step === 3 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && 'Double-check all details before submitting your order'}
+                {step === 3 && orderType === 'Tarpaulin' && 'Review order details and assigned graphic artist'}
+                {step === 3 && orderType === 'Sublimation' && 'Assign a graphic artist to handle this order'}
+                {step === 3 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && orderType !== 'Sublimation' && 'Double-check all details before submitting your order'}
                 {step === 4 && orderType === 'Tarpaulin' && 'Review order summary and process payment'}
+                {step === 4 && orderType === 'Sublimation' && 'Add products to cart and manage your order'}
               </p>
             </div>
           </div>
@@ -698,7 +940,17 @@ function CreateOrderView() {
                 Next: Order Details →
               </button>
             )}
+            {step === 2 && orderType === 'Sublimation' && (
+              <button className="btn-next" onClick={handleNextStep}>
+                Next: Order Details →
+              </button>
+            )}
             {step === 3 && orderType === 'Tarpaulin' && (
+              <button className="btn-next" onClick={handleNextStep}>
+                Next: Payment →
+              </button>
+            )}
+            {step === 3 && orderType === 'Sublimation' && (
               <button className="btn-next" onClick={handleNextStep}>
                 Next: Payment →
               </button>
@@ -713,6 +965,12 @@ function CreateOrderView() {
               <button className="btn-submit" onClick={handleSubmitOrder}>
                 <CheckCircle size={18} />
                 Process Tarpaulin Order
+              </button>
+            )}
+            {step === 4 && orderType === 'Sublimation' && (
+              <button className="btn-submit" onClick={handleSubmitOrder}>
+                <CheckCircle size={18} />
+                Process Sublimation Order
               </button>
             )}
           </div>
@@ -1100,7 +1358,252 @@ function CreateOrderView() {
         </div>
       )}
 
-      {step === 2 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && (
+      {step === 2 && orderType === 'Sublimation' && (
+        <div className="order-form-step">
+          <div className="repair-form">
+            <div className="form-section">
+              <h3 className="form-section-title">Customer Information</h3>
+              <div className="enhanced-fields-grid">
+                {/* Customer Name */}
+                <div className="enhanced-field">
+                  <label>Customer Name *</label>
+                  <div className="enhanced-field-wrapper">
+                    <div className="enhanced-field-icon">
+                      <User size={18} />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Enter customer name"
+                      value={sublimationData.customerName}
+                      onChange={(e) => handleSublimationInputChange('customerName', e.target.value)}
+                      className="enhanced-field-input"
+                    />
+                  </div>
+                </div>
+                
+                {/* Contact Number */}
+                <div className="enhanced-field">
+                  <label>Contact Number *</label>
+                  <div className="enhanced-field-wrapper">
+                    <div className="enhanced-field-icon">
+                      <Phone size={18} />
+                    </div>
+                    <input
+                      type="tel"
+                      placeholder="Enter contact number"
+                      value={sublimationData.contactNumber}
+                      onChange={(e) => handleSublimationInputChange('contactNumber', e.target.value)}
+                      className="enhanced-field-input"
+                    />
+                  </div>
+                </div>
+                
+                {/* Email Address */}
+                <div className="enhanced-field">
+                  <label>Email Address</label>
+                  <div className="enhanced-field-wrapper">
+                    <div className="enhanced-field-icon">
+                      <Mail size={18} />
+                    </div>
+                    <input
+                      type="email"
+                      placeholder="Enter email address (optional)"
+                      value={sublimationData.email}
+                      onChange={(e) => handleSublimationInputChange('email', e.target.value)}
+                      className="enhanced-field-input"
+                    />
+                  </div>
+                </div>
+                
+                {/* Business/Organization Name */}
+                <div className="enhanced-field">
+                  <label>Business/Organization Name</label>
+                  <div className="enhanced-field-wrapper">
+                    <div className="enhanced-field-icon">
+                      <Building2 size={18} />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Enter business name (optional)"
+                      value={sublimationData.businessName}
+                      onChange={(e) => handleSublimationInputChange('businessName', e.target.value)}
+                      className="enhanced-field-input"
+                    />
+                  </div>
+                </div>
+                
+                {/* Customer Address */}
+                <div className="enhanced-field enhanced-field-full">
+                  <label>Customer Address</label>
+                  <div className="enhanced-field-wrapper">
+                    <div className="enhanced-field-icon">
+                      <MapPin size={18} />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Enter customer address (optional)"
+                      value={sublimationData.address}
+                      onChange={(e) => handleSublimationInputChange('address', e.target.value)}
+                      className="enhanced-field-input"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="form-section">
+              <h3 className="form-section-title">Order Information</h3>
+              <div className="enhanced-fields-grid">
+                {/* Pickup Date */}
+                <div className="enhanced-field">
+                  <label>Pickup Date</label>
+                  <div className="enhanced-field-wrapper" style={{ position: 'relative' }}>
+                    <div className="enhanced-field-icon">
+                      <Calendar size={18} />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Click to select date"
+                      value={sublimationData.pickupDate ? new Date(sublimationData.pickupDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
+                      onClick={() => setShowCalendar(true)}
+                      readOnly
+                      className="enhanced-field-input"
+                      style={{ cursor: 'pointer' }}
+                    />
+                    
+                    {/* Custom Calendar Modal */}
+                    {showCalendar && (
+                      <>
+                        <div className="calendar-backdrop" onClick={() => setShowCalendar(false)} />
+                        <div className="custom-calendar">
+                          <div className="calendar-header">
+                            <button type="button" onClick={() => changeMonth(-1)} className="calendar-nav-btn">
+                              ←
+                            </button>
+                            <div className="calendar-title">
+                              {currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                            </div>
+                            <button type="button" onClick={() => changeMonth(1)} className="calendar-nav-btn">
+                              →
+                            </button>
+                          </div>
+                          <div className="calendar-weekdays">
+                            <div>Sun</div>
+                            <div>Mon</div>
+                            <div>Tue</div>
+                            <div>Wed</div>
+                            <div>Thu</div>
+                            <div>Fri</div>
+                            <div>Sat</div>
+                          </div>
+                          <div className="calendar-days">
+                            {(() => {
+                              const { daysInMonth, startingDayOfWeek, year, month } = getDaysInMonth(currentMonth)
+                              const days = []
+                              const today = new Date()
+                              today.setHours(0, 0, 0, 0)
+                              
+                              // Empty cells for days before month starts
+                              for (let i = 0; i < startingDayOfWeek; i++) {
+                                days.push(<div key={`empty-${i}`} className="calendar-day empty"></div>)
+                              }
+                              
+                              // Days of the month
+                              for (let day = 1; day <= daysInMonth; day++) {
+                                const date = new Date(year, month, day)
+                                date.setHours(0, 0, 0, 0)
+                                const isPast = date < today
+                                const isSelected = selectedDate && 
+                                  date.getDate() === selectedDate.getDate() &&
+                                  date.getMonth() === selectedDate.getMonth() &&
+                                  date.getFullYear() === selectedDate.getFullYear()
+                                
+                                days.push(
+                                  <div
+                                    key={day}
+                                    className={`calendar-day ${isPast ? 'past' : ''} ${isSelected ? 'selected' : ''}`}
+                                    onClick={() => !isPast && handleDateSelect(date)}
+                                  >
+                                    {day}
+                                  </div>
+                                )
+                              }
+                              
+                              return days
+                            })()}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Priority Level */}
+                <div className="enhanced-field">
+                  <label>Priority Level</label>
+                  <div className="enhanced-field-wrapper">
+                    <div className="enhanced-field-icon">
+                      <AlertCircle size={18} />
+                    </div>
+                    <select
+                      value={sublimationData.priorityLevel}
+                      onChange={(e) => handleSublimationInputChange('priorityLevel', e.target.value)}
+                      className="enhanced-field-input"
+                    >
+                      <option value="Normal">Normal</option>
+                      <option value="High">High</option>
+                      <option value="Urgent">Urgent</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Product Category */}
+                <div className="enhanced-field">
+                  <label>Product Category</label>
+                  <div className="enhanced-field-wrapper">
+                    <div className="enhanced-field-icon">
+                      <Package size={18} />
+                    </div>
+                    <select
+                      value={sublimationData.productCategory}
+                      onChange={(e) => handleSublimationInputChange('productCategory', e.target.value)}
+                      className="enhanced-field-input"
+                    >
+                      <option value="">Select Category</option>
+                      <option value="Apparel">Apparel</option>
+                      <option value="Mugs">Mugs</option>
+                      <option value="Tumblers">Tumblers</option>
+                      <option value="Phone Cases">Phone Cases</option>
+                      <option value="Keychains">Keychains</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Delivery Method */}
+                <div className="enhanced-field">
+                  <label>Delivery Method</label>
+                  <div className="enhanced-field-wrapper">
+                    <div className="enhanced-field-icon">
+                      <Truck size={18} />
+                    </div>
+                    <select
+                      value={sublimationData.deliveryMethod}
+                      onChange={(e) => handleSublimationInputChange('deliveryMethod', e.target.value)}
+                      className="enhanced-field-input"
+                    >
+                      <option value="Pickup">Pickup</option>
+                      <option value="Delivery">Delivery</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {step === 2 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && orderType !== 'Sublimation' && (
         <div className="order-form-step">
           <div className="content-placeholder">
             <Plus size={48} />
@@ -1339,63 +1842,261 @@ function CreateOrderView() {
               </div>
             </div>
 
+            {/* Graphic Artist Info Card */}
             <div className="form-section">
-              <h3 className="form-section-title">Design Specifications</h3>
-              <div className="enhanced-fields-grid">
-                {/* Background Color */}
-                <div className="enhanced-field">
-                  <label>Background Color</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Paintbrush size={18} />
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="e.g., White, Blue, Red"
-                      value={tarpaulinData.backgroundColor}
-                      onChange={(e) => handleTarpaulinInputChange('backgroundColor', e.target.value)}
-                      className="enhanced-field-input"
-                    />
+              <div className="artist-info-card">
+                <div className="artist-header">
+                  <div className="artist-avatar">
+                    <User size={40} />
+                  </div>
+                  <div className="artist-main-info">
+                    <h3 className="artist-name">John Martinez</h3>
+                    <p className="artist-role">Senior Graphic Artist</p>
                   </div>
                 </div>
-                
-                {/* Text/Main Color */}
-                <div className="enhanced-field">
-                  <label>Text/Main Color</label>
-                  <div className="enhanced-field-wrapper">
+
+                <div className="artist-details">
+                  <div className="artist-detail-item">
+                    <div className="artist-detail-icon">
+                      <Phone size={18} />
+                    </div>
+                    <div className="artist-detail-content">
+                      <div className="artist-detail-label">Contact</div>
+                      <div className="artist-detail-value">+63 912 345 6789</div>
+                    </div>
+                  </div>
+
+                  <div className="artist-detail-item">
+                    <div className="artist-detail-icon">
+                      <Mail size={18} />
+                    </div>
+                    <div className="artist-detail-content">
+                      <div className="artist-detail-label">Email</div>
+                      <div className="artist-detail-value">john.martinez@ironwolf.com</div>
+                    </div>
+                  </div>
+
+                  <div className="artist-detail-item">
+                    <div className="artist-detail-icon">
+                      <Briefcase size={18} />
+                    </div>
+                    <div className="artist-detail-content">
+                      <div className="artist-detail-label">Experience</div>
+                      <div className="artist-detail-value">5+ Years</div>
+                    </div>
+                  </div>
+
+                  <div className="artist-detail-item">
+                    <div className="artist-detail-icon">
+                      <CheckCircle size={18} />
+                    </div>
+                    <div className="artist-detail-content">
+                      <div className="artist-detail-label">Status</div>
+                      <div className="artist-detail-value">Available</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="artist-workload-details">
+                  <h4 className="workload-title">Current Workload</h4>
+                  <div className="workload-list">
+                    <div className="workload-item">
+                      <div className="workload-item-icon">
+                        <Package size={18} />
+                      </div>
+                      <div className="workload-item-content">
+                        <div className="workload-item-name">Tarpaulin Order #1234</div>
+                        <div className="workload-item-status">In Progress - 60% Complete</div>
+                      </div>
+                    </div>
+
+                    <div className="workload-item">
+                      <div className="workload-item-icon">
+                        <Palette size={18} />
+                      </div>
+                      <div className="workload-item-content">
+                        <div className="workload-item-name">Sublimation Order #1235</div>
+                        <div className="workload-item-status">Pending Review</div>
+                      </div>
+                    </div>
+
+                    <div className="workload-item">
+                      <div className="workload-item-icon">
+                        <Package size={18} />
+                      </div>
+                      <div className="workload-item-content">
+                        <div className="workload-item-name">Banner Design #1236</div>
+                        <div className="workload-item-status">Design Phase</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {step === 3 && orderType === 'Sublimation' && (
+        <div className="order-form-step">
+          <div className="repair-form">
+            <div className="form-section">
+              <h3 className="form-section-title">Graphic Artist Selection</h3>
+              <div className="artist-selection-row">
+                {/* Assigned Graphic Artist with Search */}
+                <div className="enhanced-field artist-search-field">
+                  <label>Assigned Graphic Artist *</label>
+                  <div className="enhanced-field-wrapper" style={{ position: 'relative' }}>
                     <div className="enhanced-field-icon">
-                      <Type size={18} />
+                      <User size={18} />
                     </div>
                     <input
                       type="text"
-                      placeholder="e.g., Black, Gold, Green"
-                      value={tarpaulinData.textColor}
-                      onChange={(e) => handleTarpaulinInputChange('textColor', e.target.value)}
+                      placeholder="Type to search artist..."
+                      value={artistSearch}
+                      onChange={(e) => {
+                        setArtistSearch(e.target.value)
+                        setShowArtistDropdown(true)
+                      }}
+                      onFocus={() => setShowArtistDropdown(true)}
                       className="enhanced-field-input"
+                      autoComplete="off"
                     />
+                    
+                    {/* Custom Dropdown */}
+                    {showArtistDropdown && filteredArtists.length > 0 && (
+                      <>
+                        <div 
+                          className="artist-dropdown-backdrop" 
+                          onClick={() => setShowArtistDropdown(false)}
+                        />
+                        <div className="artist-dropdown">
+                          {filteredArtists.map((artist) => (
+                            <div
+                              key={artist.id}
+                              className={`artist-dropdown-item ${artist.status === 'Not Available' ? 'unavailable' : ''}`}
+                              onClick={() => handleArtistSelect(artist.name)}
+                            >
+                              <div className="artist-dropdown-info">
+                                <span className="artist-dropdown-name">{artist.name}</span>
+                                <span className="artist-dropdown-workload">{artist.workload} orders</span>
+                              </div>
+                              <span className={`artist-dropdown-status ${artist.status === 'Available' ? 'available' : 'not-available'}`}>
+                                {artist.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Employee Status */}
+                <div className="enhanced-field employee-status-field">
+                  <label>Employee Status</label>
+                  <div className="enhanced-field-wrapper">
+                    <div className="enhanced-field-icon">
+                      <CheckCircle size={18} />
+                    </div>
+                    <div className={`status-badge ${sublimationData.assignedArtist ? (getArtistStatus(sublimationData.assignedArtist) === 'Available' ? 'status-available' : 'status-unavailable') : 'status-none'}`}>
+                      {sublimationData.assignedArtist ? getArtistStatus(sublimationData.assignedArtist) : 'Not Selected'}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="form-section">
-              <h3 className="form-section-title">Design Notes & Requirements</h3>
-              <div className="enhanced-field enhanced-field-full">
-                <label>Design Notes</label>
-                <div className="enhanced-field-wrapper enhanced-textarea-wrapper">
-                  <div className="enhanced-field-icon">
-                    <FileEdit size={18} />
+            {/* Graphic Artist Info Card */}
+            {sublimationData.assignedArtist && (
+              <div className="form-section">
+                <h3 className="form-section-title">Artist Information</h3>
+                <div className="artist-info-card">
+                  <div className="artist-header">
+                    <div className="artist-avatar">
+                      <User size={48} />
+                    </div>
+                    <div className="artist-main-info">
+                      <h3 className="artist-name">{sublimationData.assignedArtist}</h3>
+                      <p className="artist-role">Graphic Designer</p>
+                    </div>
                   </div>
-                  <textarea
-                    placeholder="Describe the design, text content, images, layout, or any special requirements..."
-                    rows="4"
-                    value={tarpaulinData.designNotes}
-                    onChange={(e) => handleTarpaulinInputChange('designNotes', e.target.value)}
-                    className="enhanced-field-textarea"
-                  />
+                  
+                  <div className="artist-details">
+                    <div className="artist-detail-item">
+                      <div className="artist-detail-icon">
+                        <Phone size={18} />
+                      </div>
+                      <div className="artist-detail-content">
+                        <div className="artist-detail-label">Contact Number</div>
+                        <div className="artist-detail-value">+63 912 345 6789</div>
+                      </div>
+                    </div>
+                    
+                    <div className="artist-detail-item">
+                      <div className="artist-detail-icon">
+                        <Briefcase size={18} />
+                      </div>
+                      <div className="artist-detail-content">
+                        <div className="artist-detail-label">Current Workload</div>
+                        <div className="artist-detail-value">5 Active Orders</div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="artist-workload-details">
+                    <h4 className="workload-title">Current Projects</h4>
+                    <div className="workload-list">
+                      <div className="workload-item">
+                        <div className="workload-item-icon">
+                          <Package size={16} />
+                        </div>
+                        <div className="workload-item-content">
+                          <div className="workload-item-name">T-Shirt Design - Corporate Event</div>
+                          <div className="workload-item-status">In Progress</div>
+                        </div>
+                      </div>
+                      <div className="workload-item">
+                        <div className="workload-item-icon">
+                          <Package size={16} />
+                        </div>
+                        <div className="workload-item-content">
+                          <div className="workload-item-name">Mug Design - Birthday Party</div>
+                          <div className="workload-item-status">In Progress</div>
+                        </div>
+                      </div>
+                      <div className="workload-item">
+                        <div className="workload-item-icon">
+                          <Package size={16} />
+                        </div>
+                        <div className="workload-item-content">
+                          <div className="workload-item-name">Tumbler Design - Wedding</div>
+                          <div className="workload-item-status">Pending Review</div>
+                        </div>
+                      </div>
+                      <div className="workload-item">
+                        <div className="workload-item-icon">
+                          <Package size={16} />
+                        </div>
+                        <div className="workload-item-content">
+                          <div className="workload-item-name">Phone Case - Personal</div>
+                          <div className="workload-item-status">Queued</div>
+                        </div>
+                      </div>
+                      <div className="workload-item">
+                        <div className="workload-item-icon">
+                          <Package size={16} />
+                        </div>
+                        <div className="workload-item-content">
+                          <div className="workload-item-name">Keychain Design - School Event</div>
+                          <div className="workload-item-status">Queued</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -1699,7 +2400,203 @@ function CreateOrderView() {
         </div>
       )}
 
-      {step === 3 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && (
+      {step === 4 && orderType === 'Sublimation' && (
+        <div className="order-form-step">
+          <div className="repair-form">
+            {!showProductSelection ? (
+              <>
+                {/* Cart Actions */}
+                <div className="form-section">
+                  <div className="cart-actions">
+                    <button 
+                      type="button" 
+                      className="btn-add-product"
+                      onClick={handleShowProductSelection}
+                    >
+                      <Plus size={20} />
+                      ADD PRODUCT
+                    </button>
+                    <button 
+                      type="button" 
+                      className="btn-clear-order"
+                      onClick={handleClearCart}
+                      disabled={cartItems.length === 0}
+                    >
+                      CLEAR ORDER
+                    </button>
+                  </div>
+                </div>
+
+                {/* Cart Table */}
+                <div className="form-section">
+                  <h3 className="form-section-title">Order Cart ({cartItems.length} items)</h3>
+                  {cartItems.length === 0 ? (
+                    <div className="cart-empty">
+                      <Package size={48} />
+                      <p>No items in cart</p>
+                      <span>Add products to get started</span>
+                    </div>
+                  ) : (
+                    <div className="cart-table-container">
+                      <table className="cart-table">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>PRODUCT TYPE</th>
+                            <th>SIZE</th>
+                            <th>QUANTITY</th>
+                            <th>ARTIST</th>
+                            <th>ACTION</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cartItems.map((item, index) => (
+                            <tr key={item.id}>
+                              <td>{index + 1}</td>
+                              <td>{item.productType}</td>
+                              <td>{item.size}</td>
+                              <td>{item.quantity}</td>
+                              <td>{item.assignedArtist}</td>
+                              <td>
+                                <button 
+                                  className="btn-remove-item"
+                                  onClick={() => handleRemoveFromCart(item.id)}
+                                  title="Remove item"
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div className="cart-summary">
+                        <div className="cart-summary-row">
+                          <span>Total Items:</span>
+                          <strong>{cartItems.reduce((sum, item) => sum + item.quantity, 0)}</strong>
+                        </div>
+                        <div className="cart-summary-row">
+                          <span>Total Products:</span>
+                          <strong>{cartItems.length}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Product Selection View */}
+                <div className="form-section">
+                  <h3 className="form-section-title">Product Selection</h3>
+                  <div className="enhanced-field">
+                    <label>Product Type *</label>
+                    <div className="enhanced-field-wrapper">
+                      <div className="enhanced-field-icon">
+                        <Package size={18} />
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="e.g., T-Shirt, Mug, Tumbler"
+                        value={productSelectionData.productType}
+                        onChange={(e) => handleProductTypeChange(e.target.value)}
+                        className="enhanced-field-input"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Size Selection */}
+                <div className="form-section">
+                  <h3 className="form-section-title">Size Selection - Standard Sizes</h3>
+                  <div className="size-selection-grid">
+                    {Object.keys(productSelectionData.sizes).map((size) => (
+                      <div key={size} className="size-item">
+                        <label className="size-label">{size}</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={productSelectionData.sizes[size]}
+                          onChange={(e) => handleSizeQuantityChange(size, e.target.value)}
+                          className="size-input"
+                          placeholder="0"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Custom Sizes */}
+                <div className="form-section">
+                  <div className="custom-size-header">
+                    <h3 className="form-section-title">Custom Sizes</h3>
+                    <button 
+                      type="button" 
+                      className="btn-add-custom-size"
+                      onClick={handleAddCustomSize}
+                    >
+                      <Plus size={16} />
+                      ADD CUSTOM SIZE
+                    </button>
+                  </div>
+                  {productSelectionData.customSizes.length > 0 && (
+                    <div className="custom-sizes-list">
+                      {productSelectionData.customSizes.map((customSize, index) => (
+                        <div key={index} className="custom-size-row">
+                          <input
+                            type="text"
+                            placeholder="Size name (e.g., 4XL, Baby)"
+                            value={customSize.size}
+                            onChange={(e) => handleCustomSizeChange(index, 'size', e.target.value)}
+                            className="custom-size-name-input"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="Quantity"
+                            value={customSize.quantity}
+                            onChange={(e) => handleCustomSizeChange(index, 'quantity', e.target.value)}
+                            className="custom-size-qty-input"
+                          />
+                          <button
+                            type="button"
+                            className="btn-remove-custom-size"
+                            onClick={() => handleRemoveCustomSize(index)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="form-section">
+                  <div className="product-selection-actions">
+                    <button 
+                      type="button" 
+                      className="btn-cancel-selection"
+                      onClick={handleCancelProductSelection}
+                    >
+                      CANCEL
+                    </button>
+                    <button 
+                      type="button" 
+                      className="btn-confirm-product"
+                      onClick={handleAddProductToCart}
+                    >
+                      ADD TO CART
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {step === 3 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && orderType !== 'Sublimation' && (
         <div className="order-form-step">
           <div className="content-placeholder">
             <CheckCircle size={48} />

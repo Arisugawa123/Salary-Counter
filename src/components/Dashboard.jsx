@@ -14,13 +14,17 @@ import {
   FileText,
   Printer,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Wallet,
+  Mail,
+  Phone
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import './Dashboard.css'
 import './TimeTracker.css'
 import './TimeTable.css'
 import {
+  supabase,
   fetchEmployees,
   createEmployee,
   updateEmployee,
@@ -115,6 +119,9 @@ function Dashboard({ activeView, setActiveView }) {
   // Employee Form Data
   const [formData, setFormData] = useState({
     name: '',
+    email: '',
+    phone: '',
+    photo: '',
     ratePer9Hours: 0,
     hoursPerShift: 9,
     shiftType: 'first'
@@ -136,6 +143,9 @@ function Dashboard({ activeView, setActiveView }) {
   const [showAddDayOffModal, setShowAddDayOffModal] = useState(false)
   const [showAutoSetupModal, setShowAutoSetupModal] = useState(false)
   const [showSwapModal, setShowSwapModal] = useState(false)
+  const [showCalendarPicker, setShowCalendarPicker] = useState(false)
+  const [calendarCurrentYear, setCalendarCurrentYear] = useState(new Date().getFullYear())
+  const [calendarCurrentMonth, setCalendarCurrentMonth] = useState(new Date().getMonth())
   const [dayOffForm, setDayOffForm] = useState({
     employeeId: '',
     employeeName: '',
@@ -203,6 +213,139 @@ function Dashboard({ activeView, setActiveView }) {
   // Load data from Supabase on mount
   useEffect(() => {
     loadAllData()
+  }, [])
+
+  // Set up real-time subscription for employees
+  useEffect(() => {
+    // Subscribe to changes in employees table
+    const employeesSubscription = supabase
+      .channel('employees-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+          schema: 'public',
+          table: 'employees'
+        },
+        (payload) => {
+          console.log('Employee change detected:', payload)
+          
+          if (payload.eventType === 'INSERT') {
+            // Add new employee
+            const newEmployee = {
+              id: payload.new.id,
+              name: payload.new.name,
+              email: payload.new.email,
+              phone: payload.new.phone,
+              photo: payload.new.photo,
+              ratePer9Hours: payload.new.rate_per9_hours,
+              hoursPerShift: payload.new.hours_per_shift,
+              shiftType: payload.new.shift_type
+            }
+            setEmployees(prev => [...prev, newEmployee])
+          } else if (payload.eventType === 'UPDATE') {
+            // Update existing employee
+            const updatedEmployee = {
+              id: payload.new.id,
+              name: payload.new.name,
+              email: payload.new.email,
+              phone: payload.new.phone,
+              photo: payload.new.photo,
+              ratePer9Hours: payload.new.rate_per9_hours,
+              hoursPerShift: payload.new.hours_per_shift,
+              shiftType: payload.new.shift_type
+            }
+            
+            setEmployees(prev => 
+              prev.map(emp => emp.id === updatedEmployee.id ? updatedEmployee : emp)
+            )
+            
+            // If the updated employee is currently selected, update selectedEmployee too
+            if (selectedEmployee && selectedEmployee.id === updatedEmployee.id) {
+              setSelectedEmployee(updatedEmployee)
+            }
+          } else if (payload.eventType === 'DELETE') {
+            // Remove deleted employee
+            setEmployees(prev => prev.filter(emp => emp.id !== payload.old.id))
+            
+            // If the deleted employee is currently selected, clear selection
+            if (selectedEmployee && selectedEmployee.id === payload.old.id) {
+              setSelectedEmployee(null)
+              setSearchQuery('')
+              setShowTimeTracker(false)
+            }
+          }
+        }
+      )
+      .subscribe()
+
+    // Cleanup subscription on unmount
+    return () => {
+      supabase.removeChannel(employeesSubscription)
+    }
+  }, [selectedEmployee])
+
+  // Set up real-time subscriptions for other tables
+  useEffect(() => {
+    // Helper function to convert snake_case to camelCase
+    const toCamelCase = (obj) => {
+      if (!obj) return obj
+      const camelObj = {}
+      for (const [key, value] of Object.entries(obj)) {
+        const camelKey = key.replace(/_([a-z0-9])/g, (_, char) => char.toUpperCase())
+        camelObj[camelKey] = value
+      }
+      return camelObj
+    }
+
+    // Subscribe to time records changes
+    const timeRecordsSubscription = supabase
+      .channel('time-records-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_records' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setTimeRecords(prev => [toCamelCase(payload.new), ...prev])
+        } else if (payload.eventType === 'UPDATE') {
+          setTimeRecords(prev => prev.map(r => r.id === payload.new.id ? toCamelCase(payload.new) : r))
+        } else if (payload.eventType === 'DELETE') {
+          setTimeRecords(prev => prev.filter(r => r.id !== payload.old.id))
+        }
+      })
+      .subscribe()
+
+    // Subscribe to cash advance records changes
+    const cashAdvanceSubscription = supabase
+      .channel('cash-advance-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_advance_records' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setCashAdvanceRecords(prev => [toCamelCase(payload.new), ...prev])
+        } else if (payload.eventType === 'UPDATE') {
+          setCashAdvanceRecords(prev => prev.map(r => r.id === payload.new.id ? toCamelCase(payload.new) : r))
+        } else if (payload.eventType === 'DELETE') {
+          setCashAdvanceRecords(prev => prev.filter(r => r.id !== payload.old.id))
+        }
+      })
+      .subscribe()
+
+    // Subscribe to day off records changes
+    const dayOffSubscription = supabase
+      .channel('day-off-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'day_off_records' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setDayOffRecords(prev => [toCamelCase(payload.new), ...prev])
+        } else if (payload.eventType === 'UPDATE') {
+          setDayOffRecords(prev => prev.map(r => r.id === payload.new.id ? toCamelCase(payload.new) : r))
+        } else if (payload.eventType === 'DELETE') {
+          setDayOffRecords(prev => prev.filter(r => r.id !== payload.old.id))
+        }
+      })
+      .subscribe()
+
+    // Cleanup subscriptions on unmount
+    return () => {
+      supabase.removeChannel(timeRecordsSubscription)
+      supabase.removeChannel(cashAdvanceSubscription)
+      supabase.removeChannel(dayOffSubscription)
+    }
   }, [])
 
   const loadAllData = async () => {
@@ -340,13 +483,16 @@ function Dashboard({ activeView, setActiveView }) {
       try {
       const newEmployee = {
         name: formData.name,
+        email: formData.email || null,
+        phone: formData.phone || null,
+        photo: formData.photo || null,
         ratePer9Hours: Number(formData.ratePer9Hours),
         hoursPerShift: Number(formData.hoursPerShift),
         shiftType: formData.shiftType
       }
         const savedEmployee = await createEmployee(newEmployee)
         setEmployees([...employees, savedEmployee])
-        setFormData({ name: '', ratePer9Hours: 0, hoursPerShift: 9, shiftType: 'first' })
+        setFormData({ name: '', email: '', phone: '', photo: '', ratePer9Hours: 0, hoursPerShift: 9, shiftType: 'first' })
       setShowAddModal(false)
         showSuccess('Employee Added!', `${savedEmployee.name} has been added to the system.`, [])
       } catch (error) {
@@ -360,6 +506,9 @@ function Dashboard({ activeView, setActiveView }) {
     setEditingEmployee(employee.id)
     setFormData({
       name: employee.name || '',
+      email: employee.email || '',
+      phone: employee.phone || '',
+      photo: employee.photo || '',
       ratePer9Hours: employee.ratePer9Hours || 0,
       hoursPerShift: employee.hoursPerShift || 9,
       shiftType: employee.shiftType || 'first'
@@ -371,7 +520,10 @@ function Dashboard({ activeView, setActiveView }) {
     if (formData.name && formData.ratePer9Hours) {
       try {
         const updates = {
-              name: formData.name, 
+              name: formData.name,
+              email: formData.email || null,
+              phone: formData.phone || null,
+              photo: formData.photo || null,
               ratePer9Hours: Number(formData.ratePer9Hours), 
               hoursPerShift: Number(formData.hoursPerShift),
               shiftType: formData.shiftType
@@ -383,7 +535,7 @@ function Dashboard({ activeView, setActiveView }) {
             ? { ...emp, ...updates }
           : emp
       ))
-        setFormData({ name: '', ratePer9Hours: 0, hoursPerShift: 9, shiftType: 'first' })
+        setFormData({ name: '', email: '', phone: '', photo: '', ratePer9Hours: 0, hoursPerShift: 9, shiftType: 'first' })
       setShowAddModal(false)
       setEditingEmployee(null)
         showSuccess('Employee Updated!', 'Employee information has been updated.', [])
@@ -482,14 +634,136 @@ function Dashboard({ activeView, setActiveView }) {
       regularHours += (secondOut - secondIn) / (1000 * 60 * 60)
     }
     
-    // Calculate OT hours
+    // Calculate OT hours - Handle overnight OT (crosses midnight)
     if (dayEntry.otTimeIn && dayEntry.otTimeOut) {
       const otIn = new Date(`2000-01-01T${dayEntry.otTimeIn}`)
-      const otOut = new Date(`2000-01-01T${dayEntry.otTimeOut}`)
+      let otOut = new Date(`2000-01-01T${dayEntry.otTimeOut}`)
+      
+      // If OT ends before it starts, it means it crosses midnight (e.g. 22:40 to 03:10)
+      if (otOut < otIn) {
+        otOut = new Date(`2000-01-02T${dayEntry.otTimeOut}`)
+      }
+      
       overtimeHours += (otOut - otIn) / (1000 * 60 * 60)
     }
     
     return { regularHours, overtimeHours }
+  }
+
+  // Determine row status for time entry
+  const getRowStatus = (day, entry) => {
+    if (!selectedEmployee) return ''
+    
+    // Debug: Log day off records for this employee
+    if (day === 1) { // Only log once per render
+      const employeeDayOffs = dayOffRecords.filter(r => {
+        const empId = r.employeeId || r.employee_id
+        return empId === selectedEmployee.id
+      })
+      console.log('Day Off Records for employee:', selectedEmployee.name, employeeDayOffs)
+      console.log('Selected Month/Year:', selectedMonth, selectedYear)
+    }
+    
+    // Check if this day has a day off record
+    const dayOffRecord = dayOffRecords.find(record => {
+      const recordDate = new Date(record.date)
+      const recordDay = recordDate.getDate()
+      const recordMonth = recordDate.getMonth()
+      const recordYear = recordDate.getFullYear()
+      
+      // Handle both camelCase and snake_case property names
+      const recordEmployeeId = record.employeeId || record.employee_id
+      
+      const matches = (
+        recordEmployeeId === selectedEmployee.id &&
+        recordDay === day &&
+        recordMonth === selectedMonth &&
+        recordYear === selectedYear
+      )
+      
+      // Debug logging
+      if (matches) {
+        console.log('Day Off Match Found:', {
+          recordDate: record.date,
+          day,
+          selectedMonth,
+          selectedYear,
+          employeeId: selectedEmployee.id
+        })
+      }
+      
+      return matches
+    })
+    
+    if (dayOffRecord) {
+      console.log('Returning dayoff status for day:', day)
+      return 'row-status-dayoff'
+    }
+    
+    // Check for morning/first shift
+    const hasMorningIn = !!(entry.firstShiftIn && entry.firstShiftIn.trim())
+    const hasMorningOut = !!(entry.firstShiftOut && entry.firstShiftOut.trim())
+    const hasMorning = hasMorningIn && hasMorningOut
+    
+    // Check for afternoon/second shift
+    const hasAfternoonIn = !!(entry.secondShiftIn && entry.secondShiftIn.trim())
+    const hasAfternoonOut = !!(entry.secondShiftOut && entry.secondShiftOut.trim())
+    const hasAfternoon = hasAfternoonIn && hasAfternoonOut
+    
+    // Check if any field has data
+    const hasAnyData = hasMorningIn || hasMorningOut || hasAfternoonIn || hasAfternoonOut || 
+                       !!(entry.otTimeIn && entry.otTimeIn.trim()) || 
+                       !!(entry.otTimeOut && entry.otTimeOut.trim())
+    
+    // If no data at all, check if it's a skipped day (BETWEEN two days with data)
+    if (!hasAnyData) {
+      const currentDay = day
+      let hasDataBefore = false
+      let hasDataAfter = false
+      
+      // Check if there's any data in previous or future days
+      Object.keys(timeEntries).forEach(d => {
+        const dayNum = Number(d)
+        const prevEntry = timeEntries[dayNum]
+        const hasEntryData = !!(prevEntry.firstShiftIn || prevEntry.firstShiftOut || 
+            prevEntry.secondShiftIn || prevEntry.secondShiftOut ||
+            prevEntry.otTimeIn || prevEntry.otTimeOut)
+        
+        if (dayNum < currentDay && hasEntryData) {
+          hasDataBefore = true
+        }
+        if (dayNum > currentDay && hasEntryData) {
+          hasDataAfter = true
+        }
+      })
+      
+      // Mark as absent ONLY if there's data BOTH before AND after (it's between two entries)
+      if (hasDataBefore && hasDataAfter) {
+        return 'row-status-absent'
+      }
+      
+      return '' // No status if no data yet
+    }
+    
+    // Check for errors (incomplete pairs)
+    const morningIncomplete = (hasMorningIn && !hasMorningOut) || (!hasMorningIn && hasMorningOut)
+    const afternoonIncomplete = (hasAfternoonIn && !hasAfternoonOut) || (!hasAfternoonIn && hasAfternoonOut)
+    
+    if (morningIncomplete || afternoonIncomplete) {
+      return 'row-status-error'
+    }
+    
+    // GREEN: Both morning and afternoon complete
+    if (hasMorning && hasAfternoon) {
+      return 'row-status-complete'
+    }
+    
+    // YELLOW: Only morning OR afternoon complete
+    if (hasMorning || hasAfternoon) {
+      return 'row-status-partial'
+    }
+    
+    return ''
   }
 
   const calculateLateMinutes = () => {
@@ -599,7 +873,7 @@ function Dashboard({ activeView, setActiveView }) {
     
     return {
       regularPay: regularPay.toFixed(2),
-      overtimePay: overtimePay.toFixed(2),
+      overtimePay: Math.abs(overtimePay).toFixed(2),
       grossPay: grossPay.toFixed(2),
       rushTarpCommission: rushTarpCommission.toFixed(2),
       regularCommission: regularCommission.toFixed(2),
@@ -607,9 +881,9 @@ function Dashboard({ activeView, setActiveView }) {
       totalCommissions: totalCommissions.toFixed(2),
       totalDeductions: totalDeductions.toFixed(2),
       netPay: netPay.toFixed(2),
-      totalHours: totalHours.toFixed(2),
-      regularHours: totalRegularHours.toFixed(2),
-      totalOvertimeHours: totalOvertimeHours.toFixed(2),
+      totalHours: Math.abs(totalHours).toFixed(2),
+      regularHours: Math.abs(totalRegularHours).toFixed(2),
+      totalOvertimeHours: Math.abs(totalOvertimeHours).toFixed(2),
       lateMinutes: lateMinutes,
       lateDeduction: lateDeduction.toFixed(2),
       dayOffHours: dayOffHours.toFixed(2)
@@ -668,6 +942,12 @@ function Dashboard({ activeView, setActiveView }) {
   }
 
   const handleTimeInputKeyPress = (e, day, field) => {
+    const fieldOrder = ['firstShiftIn', 'firstShiftOut', 'secondShiftIn', 'secondShiftOut', 'otTimeIn', 'otTimeOut']
+    const currentFieldIndex = fieldOrder.indexOf(field)
+    const days = Object.keys(timeEntries).map(Number).sort((a, b) => a - b)
+    const currentDayIndex = days.indexOf(day)
+    
+    // Handle Enter key - format and move to next field
     if (e.key === 'Enter') {
       e.preventDefault()
       
@@ -685,9 +965,6 @@ function Dashboard({ activeView, setActiveView }) {
       }
       
       // Move to next field
-      const fieldOrder = ['firstShiftIn', 'firstShiftOut', 'secondShiftIn', 'secondShiftOut', 'otTimeIn', 'otTimeOut']
-      const currentFieldIndex = fieldOrder.indexOf(field)
-      
       if (currentFieldIndex < fieldOrder.length - 1) {
         // Move to next field in same day
         const nextField = fieldOrder[currentFieldIndex + 1]
@@ -698,8 +975,6 @@ function Dashboard({ activeView, setActiveView }) {
         }
       } else {
         // Move to first field of next day
-        const days = Object.keys(timeEntries).map(Number).sort((a, b) => a - b)
-        const currentDayIndex = days.indexOf(day)
         if (currentDayIndex < days.length - 1) {
           const nextDay = days[currentDayIndex + 1]
           const nextInput = document.querySelector(`input[data-day="${nextDay}"][data-field="firstShiftIn"]`)
@@ -707,6 +982,72 @@ function Dashboard({ activeView, setActiveView }) {
             nextInput.focus()
             nextInput.select()
           }
+        }
+      }
+    }
+    
+    // Handle Arrow Right - move to next field
+    if (e.key === 'ArrowRight' && e.target.selectionStart === e.target.value.length) {
+      e.preventDefault()
+      if (currentFieldIndex < fieldOrder.length - 1) {
+        const nextField = fieldOrder[currentFieldIndex + 1]
+        const nextInput = document.querySelector(`input[data-day="${day}"][data-field="${nextField}"]`)
+        if (nextInput) {
+          nextInput.focus()
+          nextInput.select()
+        }
+      } else if (currentDayIndex < days.length - 1) {
+        const nextDay = days[currentDayIndex + 1]
+        const nextInput = document.querySelector(`input[data-day="${nextDay}"][data-field="firstShiftIn"]`)
+        if (nextInput) {
+          nextInput.focus()
+          nextInput.select()
+        }
+      }
+    }
+    
+    // Handle Arrow Left - move to previous field
+    if (e.key === 'ArrowLeft' && e.target.selectionStart === 0) {
+      e.preventDefault()
+      if (currentFieldIndex > 0) {
+        const prevField = fieldOrder[currentFieldIndex - 1]
+        const prevInput = document.querySelector(`input[data-day="${day}"][data-field="${prevField}"]`)
+        if (prevInput) {
+          prevInput.focus()
+          prevInput.select()
+        }
+      } else if (currentDayIndex > 0) {
+        const prevDay = days[currentDayIndex - 1]
+        const prevInput = document.querySelector(`input[data-day="${prevDay}"][data-field="otTimeOut"]`)
+        if (prevInput) {
+          prevInput.focus()
+          prevInput.select()
+        }
+      }
+    }
+    
+    // Handle Arrow Down - move to same field in next day
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (currentDayIndex < days.length - 1) {
+        const nextDay = days[currentDayIndex + 1]
+        const nextInput = document.querySelector(`input[data-day="${nextDay}"][data-field="${field}"]`)
+        if (nextInput) {
+          nextInput.focus()
+          nextInput.select()
+        }
+      }
+    }
+    
+    // Handle Arrow Up - move to same field in previous day
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (currentDayIndex > 0) {
+        const prevDay = days[currentDayIndex - 1]
+        const prevInput = document.querySelector(`input[data-day="${prevDay}"][data-field="${field}"]`)
+        if (prevInput) {
+          prevInput.focus()
+          prevInput.select()
         }
       }
     }
@@ -926,11 +1267,11 @@ function Dashboard({ activeView, setActiveView }) {
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Payroll Slips</title>
+        <title>Payroll Slips - IRONWOLF DIGITAL PRINTING</title>
         <style>
           @page {
             size: portrait;
-            margin: 0.4in;
+            margin: 0.3in;
           }
           @media print {
             body { margin: 0; padding: 0; }
@@ -941,150 +1282,258 @@ function Dashboard({ activeView, setActiveView }) {
             print-color-adjust: exact;
           }
           body {
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             padding: 0;
             margin: 0;
+            background: white;
           }
+          
           .slip {
-            border: 2px solid #333;
-            padding: 0;
-            margin-bottom: 8px;
+            background: white;
+            border: 3px solid #000;
+            margin-bottom: 12px;
             page-break-inside: avoid;
-            height: 3.35in;
-            background: #fff;
+            height: 3.4in;
             overflow: hidden;
           }
+          
+          /* Header Section */
           .slip-header {
-            border-bottom: 2px solid #333;
-            padding: 6px 12px;
+            background: #000;
+            color: white;
+            padding: 12px 16px;
             text-align: center;
+            border-bottom: 3px solid #000;
           }
-          .slip-header h2 {
-            margin: 0;
+          
+          .company-name {
             font-size: 16px;
+            font-weight: 900;
             text-transform: uppercase;
-            font-weight: bold;
+            letter-spacing: 2px;
+            margin: 0 0 5px 0;
+          }
+          
+          .slip-title {
+            font-size: 11px;
+            margin: 0 0 6px 0;
+            letter-spacing: 3px;
+            font-weight: 700;
+            border-top: 2px solid #fff;
+            border-bottom: 2px solid #fff;
+            padding: 5px 0;
+          }
+          
+          .period-info {
+            font-size: 9px;
+            margin: 0;
+            font-weight: 600;
             letter-spacing: 1px;
           }
-          .slip-header p {
-            margin: 2px 0 0 0;
-            font-size: 9px;
-            color: #666;
-          }
+          
+          /* Body Section */
           .slip-body {
-            padding: 6px 12px;
+            padding: 12px 16px;
           }
+          
+          /* Employee Section */
           .employee-section {
-            border: 1px solid #333;
-            padding: 4px 8px;
-            margin-bottom: 5px;
+            background: #f8f8f8;
+            border: 2px solid #000;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 10px;
             text-align: center;
           }
-          .employee-section .label {
-            font-size: 7px;
-            text-transform: uppercase;
-            font-weight: bold;
-            color: #888;
-            margin-bottom: 1px;
-          }
-          .employee-section .name {
-            font-size: 13px;
-            font-weight: bold;
-            color: #000;
-          }
-          .info-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr 1fr;
-            gap: 4px;
-            margin-bottom: 5px;
-          }
-          .info-box {
-            border: 1px solid #ddd;
-            padding: 3px 5px;
-            background: #fafafa;
-            text-align: center;
-          }
-          .info-box .label {
-            font-size: 7px;
-            text-transform: uppercase;
-            font-weight: bold;
-            color: #888;
-            margin-bottom: 1px;
-          }
-          .info-box .value {
-            font-size: 9px;
-            font-weight: bold;
-            color: #000;
-          }
-          .section-title {
+          
+          .employee-label {
             font-size: 8px;
-            font-weight: bold;
             text-transform: uppercase;
+            font-weight: 700;
+            color: #666;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+          }
+          
+          .employee-name {
+            font-size: 16px;
+            font-weight: 900;
+            color: #000;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+          }
+          
+          /* Time Summary Grid */
+          .time-summary {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+            margin-bottom: 10px;
+            padding: 8px;
+            background: #f8f8f8;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+          }
+          
+          .time-box {
+            text-align: center;
+            padding: 6px 4px;
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+          }
+          
+          .time-label {
+            font-size: 7px;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: #666;
             letter-spacing: 0.5px;
-            color: #333;
-            padding: 2px 0;
-            margin: 3px 0 2px 0;
-            border-bottom: 1px solid #333;
+            margin-bottom: 3px;
           }
-          .detail-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 1px 4px;
+          
+          .time-value {
+            font-size: 12px;
+            font-weight: 900;
+            color: #000;
+            font-family: 'Courier New', monospace;
+          }
+          
+          /* Earnings and Deductions Container */
+          .pay-section {
+            margin-bottom: 8px;
+          }
+          
+          .section-title {
+            background: #000;
+            color: white;
+            padding: 5px 10px;
             font-size: 9px;
-            border-bottom: 1px dotted #ddd;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 6px;
           }
-          .detail-row:last-child {
+          
+          .pay-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 6px;
+          }
+          
+          .pay-table tr {
+            border-bottom: 1px solid #ddd;
+          }
+          
+          .pay-table tr:last-child {
             border-bottom: none;
           }
-          .detail-label {
+          
+          .pay-table td {
+            padding: 4px 6px;
+            font-size: 9px;
+          }
+          
+          .pay-table td:first-child {
             color: #555;
+            font-weight: 500;
           }
-          .detail-value {
-            font-weight: bold;
+          
+          .pay-table td:last-child {
+            text-align: right;
+            font-weight: 700;
             color: #000;
+            font-family: 'Courier New', monospace;
           }
-          .total-row {
+          
+          /* Subtotal Row */
+          .subtotal-row {
+            background: #f0f0f0;
+            border: 2px solid #000;
+            padding: 7px 10px;
             display: flex;
             justify-content: space-between;
-            padding: 3px 6px;
+            margin-bottom: 8px;
+          }
+          
+          .subtotal-label {
             font-size: 10px;
-            background: #f5f5f5;
-            border: 1px solid #999;
-            margin-top: 2px;
-            font-weight: bold;
-          }
-          .net-pay-section {
-            border: 2px solid #333;
-            padding: 5px 10px;
-            text-align: center;
-            margin-top: 4px;
-          }
-          .net-pay-section .label {
-            font-size: 9px;
-            font-weight: bold;
-            letter-spacing: 1px;
-            color: #666;
-            margin-bottom: 2px;
-          }
-          .net-pay-section .amount {
-            font-size: 16px;
-            font-weight: bold;
+            font-weight: 900;
+            text-transform: uppercase;
             color: #000;
+            letter-spacing: 0.5px;
           }
-          .balance-notice {
-            background: #ffcccc;
-            border: 3px solid #cc0000;
-            padding: 5px 8px;
-            margin-top: 4px;
-            font-size: 9px;
-            text-align: center;
-            font-weight: bold;
-            color: #cc0000;
-          }
-          .balance-notice strong {
-            display: block;
+          
+          .subtotal-value {
             font-size: 11px;
-            margin-top: 2px;
+            font-weight: 900;
+            color: #000;
+            font-family: 'Courier New', monospace;
+          }
+          
+          /* Net Pay Section */
+          .net-pay-section {
+            background: #000;
+            color: white;
+            padding: 10px 12px;
+            text-align: center;
+            border: 3px solid #000;
+            margin-top: 10px;
+          }
+          
+          .net-pay-label {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+          }
+          
+          .net-pay-amount {
+            font-size: 20px;
+            font-weight: 900;
+            font-family: 'Courier New', monospace;
+            letter-spacing: 1px;
+          }
+          
+          /* Cash Advance Warning */
+          .cash-advance-warning {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            padding: 6px 10px;
+            margin-top: 8px;
+            text-align: center;
+            border-radius: 4px;
+          }
+          
+          .warning-label {
+            font-size: 7px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #856404;
+            letter-spacing: 1px;
+            margin-bottom: 3px;
+          }
+          
+          .warning-value {
+            font-size: 14px;
+            font-weight: 900;
+            color: #856404;
+            font-family: 'Courier New', monospace;
+          }
+          
+          /* Footer */
+          .slip-footer {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #f8f8f8;
+            border-top: 2px solid #ddd;
+            padding: 6px;
+            text-align: center;
+            font-size: 7px;
+            color: #666;
           }
         </style>
       </head>
@@ -1093,83 +1542,105 @@ function Dashboard({ activeView, setActiveView }) {
           const cashAdvanceBalance = getEmployeeCashAdvanceBalance(record.employeeId)
           return `
           <div class="slip">
+            <!-- Header -->
             <div class="slip-header">
-              <h2>PAYROLL SLIP</h2>
-              <p>${record.month} ${record.year} - Days ${record.payPeriod}</p>
+              <div class="company-name">IRONWOLF DIGITAL PRINTING</div>
+              <div class="slip-title">PAY SLIP</div>
+              <div class="period-info">${record.month} ${record.year} | Pay Period: ${record.payPeriod}</div>
             </div>
             
+            <!-- Body -->
             <div class="slip-body">
+              <!-- Employee Name -->
               <div class="employee-section">
-                <div class="label">Employee Name</div>
-                <div class="name">${record.employeeName}</div>
+                <div class="employee-label">Employee</div>
+                <div class="employee-name">${record.employeeName}</div>
               </div>
               
-              <div class="info-grid">
-                <div class="info-box">
-                  <div class="label">Reg Hrs</div>
-                  <div class="value">${parseFloat(record.regularHours).toFixed(1)}</div>
+              <!-- Time Summary -->
+              <div class="time-summary">
+                <div class="time-box">
+                  <div class="time-label">Regular</div>
+                  <div class="time-value">${parseFloat(record.regularHours).toFixed(1)}</div>
                 </div>
-                <div class="info-box">
-                  <div class="label">OT Hrs</div>
-                  <div class="value">${parseFloat(record.totalOvertimeHours).toFixed(1)}</div>
+                <div class="time-box">
+                  <div class="time-label">Overtime</div>
+                  <div class="time-value">${Math.abs(parseFloat(record.totalOvertimeHours)).toFixed(1)}</div>
                 </div>
-                <div class="info-box">
-                  <div class="label">Late</div>
-                  <div class="value">${record.lateMinutes}m</div>
+                <div class="time-box">
+                  <div class="time-label">Late (min)</div>
+                  <div class="time-value">${record.lateMinutes}</div>
                 </div>
-                <div class="info-box">
-                  <div class="label">Total</div>
-                  <div class="value">${(parseFloat(record.regularHours) + parseFloat(record.totalOvertimeHours)).toFixed(1)}</div>
+                <div class="time-box">
+                  <div class="time-label">Total Hrs</div>
+                  <div class="time-value">${(parseFloat(record.regularHours) + Math.abs(parseFloat(record.totalOvertimeHours))).toFixed(1)}</div>
                 </div>
               </div>
               
-              <div class="section-title">EARNINGS</div>
-              <div class="detail-row">
-                <span class="detail-label">Regular Pay</span>
-                <span class="detail-value">₱${parseFloat(record.regularPay).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div class="detail-row">
-                <span class="detail-label">Overtime Pay</span>
-                <span class="detail-value">₱${parseFloat(record.overtimePay).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div class="detail-row">
-                <span class="detail-label">Rush Tarp Commission</span>
-                <span class="detail-value">₱${parseFloat(record.rushTarpCommission).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div class="detail-row">
-                <span class="detail-label">Regular Commission</span>
-                <span class="detail-value">₱${parseFloat(record.regularCommission).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div class="total-row">
-                <span>GROSS PAY</span>
-                <span>₱${(parseFloat(record.grossPay) + parseFloat(record.totalCommissions)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              
-              <div class="section-title">DEDUCTIONS</div>
-              <div class="detail-row">
-                <span class="detail-label">Cash Advance Deduction</span>
-                <span class="detail-value">₱${parseFloat(record.cashAdvance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div class="detail-row">
-                <span class="detail-label">Late Deduction</span>
-                <span class="detail-value">₱${parseFloat(record.lateDeduction).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div class="total-row">
-                <span>TOTAL DEDUCTIONS</span>
-                <span>₱${parseFloat(record.totalDeductions).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <!-- Earnings -->
+              <div class="pay-section">
+                <div class="section-title">EARNINGS</div>
+                <table class="pay-table">
+                  <tr>
+                    <td>Regular Pay</td>
+                    <td>₱${parseFloat(record.regularPay).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  </tr>
+                  <tr>
+                    <td>Overtime Pay</td>
+                    <td>₱${Math.abs(parseFloat(record.overtimePay)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  </tr>
+                  <tr>
+                    <td>Rush Tarp Commission</td>
+                    <td>₱${parseFloat(record.rushTarpCommission).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  </tr>
+                  <tr>
+                    <td>Regular Commission</td>
+                    <td>₱${parseFloat(record.regularCommission).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  </tr>
+                </table>
+                <div class="subtotal-row">
+                  <span class="subtotal-label">Gross Pay</span>
+                  <span class="subtotal-value">₱${(parseFloat(record.grossPay) + parseFloat(record.totalCommissions)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
               </div>
               
+              <!-- Deductions -->
+              <div class="pay-section">
+                <div class="section-title">DEDUCTIONS</div>
+                <table class="pay-table">
+                  <tr>
+                    <td>Cash Advance</td>
+                    <td>₱${parseFloat(record.cashAdvance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  </tr>
+                  <tr>
+                    <td>Late Deduction</td>
+                    <td>₱${parseFloat(record.lateDeduction).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  </tr>
+                </table>
+                <div class="subtotal-row">
+                  <span class="subtotal-label">Total Deductions</span>
+                  <span class="subtotal-value">₱${parseFloat(record.totalDeductions).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+              
+              <!-- Net Pay -->
               <div class="net-pay-section">
-                <div class="label">NET PAY</div>
-                <div class="amount">₱${parseFloat(record.netPay).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                <div class="net-pay-label">NET PAY</div>
+                <div class="net-pay-amount">₱${parseFloat(record.netPay).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
               </div>
               
+              <!-- Cash Advance Balance -->
               ${cashAdvanceBalance > 0 ? `
-                <div class="balance-notice">
-                  <div>⚠ CASH ADVANCE BALANCE ⚠</div>
-                  <strong>₱${cashAdvanceBalance.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                <div class="cash-advance-warning">
+                  <div class="warning-label">⚠ Outstanding Cash Advance Balance</div>
+                  <div class="warning-value">₱${cashAdvanceBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                 </div>
               ` : ''}
+            </div>
+            
+            <!-- Footer -->
+            <div class="slip-footer">
+              IRONWOLF DIGITAL PRINTING • This is a computer-generated document • Confidential
             </div>
           </div>
         `}).join('')}
@@ -1203,10 +1674,13 @@ function Dashboard({ activeView, setActiveView }) {
         <style>
           @page {
             size: landscape;
-            margin: 0.5in;
+            margin: 0.3in 0.4in;
           }
           @media print {
-            body { margin: 0; padding: 0; }
+            body { 
+              margin: 0; 
+              padding: 0; 
+            }
           }
           * {
             box-sizing: border-box;
@@ -1214,98 +1688,379 @@ function Dashboard({ activeView, setActiveView }) {
             print-color-adjust: exact;
           }
           body {
-            font-family: Arial, sans-serif;
-            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: white;
+            color: #000;
           }
-          .header {
+          
+          .document-container {
+            padding: 15px 20px;
+            background: white;
+          }
+          
+          /* Header Section */
+          .document-header {
+            border-bottom: 3px solid #000;
+            padding-bottom: 10px;
+            margin-bottom: 12px;
+          }
+          
+          .company-info {
             text-align: center;
-            margin-bottom: 20px;
-            padding: 15px;
-            border: 3px solid #000;
+            margin-bottom: 8px;
           }
-          .header h1 {
-            margin: 0 0 5px 0;
+          
+          .company-name {
             font-size: 24px;
+            font-weight: 900;
+            margin: 0 0 3px 0;
+            color: #000;
             text-transform: uppercase;
+            letter-spacing: 2px;
           }
-          .header p {
+          
+          .company-tagline {
+            font-size: 9px;
+            color: #666;
             margin: 0;
-            font-size: 12px;
+            font-style: italic;
           }
-          table {
+          
+          .document-title {
+            background: linear-gradient(135deg, #1a1a1a 0%, #000 100%);
+            color: #fff;
+            padding: 8px 15px;
+            text-align: center;
+            margin: 8px 0 6px 0;
+            border-radius: 3px;
+          }
+          
+          .document-title h1 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+          }
+          
+          .report-info {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 9px;
+            color: #333;
+          }
+          
+          .report-info-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+          }
+          
+          .report-info-label {
+            font-weight: 600;
+            color: #000;
+            text-transform: uppercase;
+            font-size: 8px;
+            letter-spacing: 0.3px;
+          }
+          
+          .report-info-value {
+            font-size: 10px;
+            font-weight: 700;
+          }
+          
+          /* Table Styles */
+          .payroll-table {
             width: 100%;
             border-collapse: collapse;
-            border: 2px solid #000;
+            margin: 8px 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
           }
-          th, td {
-            border: 1px solid #000;
-            padding: 8px;
+          
+          .payroll-table thead tr {
+            background: linear-gradient(135deg, #1a1a1a 0%, #000 100%);
+            color: white;
+          }
+          
+          .payroll-table th {
+            padding: 6px 5px;
             text-align: left;
-            font-size: 11px;
-          }
-          th {
-            background: #000;
-            color: #fff;
-            font-weight: bold;
+            font-size: 8px;
+            font-weight: 700;
             text-transform: uppercase;
+            letter-spacing: 0.3px;
+            border: 1px solid #333;
           }
-          .total-row {
-            font-weight: bold;
+          
+          .payroll-table th.numeric {
+            text-align: right;
+          }
+          
+          .payroll-table tbody tr {
+            border-bottom: 1px solid #e0e0e0;
+          }
+          
+          .payroll-table tbody tr:nth-child(odd) {
+            background: #f9f9f9;
+          }
+          
+          .payroll-table tbody tr:hover {
             background: #f0f0f0;
           }
-          .employee-cell {
-            font-weight: bold;
+          
+          .payroll-table td {
+            padding: 5px;
+            font-size: 8px;
+            border: 1px solid #ddd;
+            color: #000;
+          }
+          
+          .payroll-table td.numeric {
+            text-align: right;
+            font-weight: 600;
+            font-family: 'Courier New', monospace;
+          }
+          
+          .employee-name {
+            font-weight: 700;
+            color: #000;
+            font-size: 9px;
+          }
+          
+          .period-cell {
+            font-weight: 600;
+            color: #333;
+          }
+          
+          /* Total Row */
+          .total-row {
+            background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+            border-top: 2px solid #000 !important;
+            border-bottom: 2px solid #000 !important;
+          }
+          
+          .total-row td {
+            font-weight: 700;
+            font-size: 9px;
+            padding: 8px 5px;
+            color: #000;
+            border-color: #999;
+          }
+          
+          .total-label {
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 10px;
+            font-weight: 900;
+          }
+          
+          .total-row td.numeric {
+            font-size: 9px;
+            font-weight: 900;
+          }
+          
+          /* Summary Section */
+          .summary-section {
+            margin-top: 12px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            padding: 10px;
+            background: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+          }
+          
+          .summary-item {
+            text-align: center;
+            padding: 8px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+          }
+          
+          .summary-label {
+            font-size: 7px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #666;
+            font-weight: 600;
+            margin-bottom: 4px;
+          }
+          
+          .summary-value {
+            font-size: 13px;
+            font-weight: 900;
+            color: #000;
+            font-family: 'Courier New', monospace;
+          }
+          
+          /* Footer Section */
+          .document-footer {
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+          }
+          
+          .signatures {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+          }
+          
+          .signature-line {
+            text-align: center;
+          }
+          
+          .signature-space {
+            border-top: 2px solid #000;
+            margin-bottom: 5px;
+            padding-top: 30px;
+          }
+          
+          .signature-label {
+            font-size: 8px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #000;
+            letter-spacing: 0.3px;
+          }
+          
+          .signature-role {
+            font-size: 7px;
+            color: #666;
+            font-style: italic;
+            margin-top: 2px;
+          }
+          
+          .print-date {
+            text-align: center;
+            margin-top: 10px;
+            font-size: 7px;
+            color: #999;
           }
         </style>
       </head>
       <body>
-        <div class="header">
-          <h1>Payroll Records</h1>
-          <p>Generated on ${new Date().toLocaleDateString()}</p>
-          <p>Total Records: ${timeRecords.length}</p>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Employee</th>
-              <th>Period</th>
-              <th>Month/Year</th>
-              <th>Total Hours</th>
-              <th>Regular Pay</th>
-              <th>Overtime</th>
-              <th>Gross Pay</th>
-              <th>Commissions</th>
-              <th>Deductions</th>
-              <th>Net Pay</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${timeRecords.map(record => `
+        <div class="document-container">
+          <!-- Header -->
+          <div class="document-header">
+            <div class="company-info">
+              <h1 class="company-name">IRONWOLF DIGITAL PRINTING</h1>
+              <p class="company-tagline">Payroll Management System</p>
+            </div>
+            
+            <div class="document-title">
+              <h1>Payroll Records Report</h1>
+            </div>
+            
+            <div class="report-info">
+              <div class="report-info-item">
+                <span class="report-info-label">Report Date</span>
+                <span class="report-info-value">${new Date().toLocaleDateString('en-US', { 
+                  weekday: 'long', 
+                  year: 'numeric', 
+                  month: 'long', 
+                  day: 'numeric' 
+                })}</span>
+              </div>
+              <div class="report-info-item">
+                <span class="report-info-label">Total Records</span>
+                <span class="report-info-value">${timeRecords.length} Employees</span>
+              </div>
+              <div class="report-info-item">
+                <span class="report-info-label">Status</span>
+                <span class="report-info-value">Official Document</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Payroll Table -->
+          <table class="payroll-table">
+            <thead>
               <tr>
-                <td class="employee-cell">${record.employeeName}</td>
-                <td>${record.payPeriod}</td>
-                <td>${record.month} ${record.year}</td>
-                <td>${record.totalHours} hrs</td>
-                <td>₱${Number(record.regularPay).toLocaleString()}</td>
-                <td>₱${Number(record.overtimePay).toLocaleString()}</td>
-                <td>₱${Number(record.grossPay).toLocaleString()}</td>
-                <td>₱${Number(record.totalCommissions).toLocaleString()}</td>
-                <td>₱${Number(record.totalDeductions).toLocaleString()}</td>
-                <td>₱${Number(record.netPay).toLocaleString()}</td>
+                <th>Employee Name</th>
+                <th>Period</th>
+                <th>Month/Year</th>
+                <th class="numeric">Hours</th>
+                <th class="numeric">Regular Pay</th>
+                <th class="numeric">Overtime</th>
+                <th class="numeric">Gross Pay</th>
+                <th class="numeric">Commissions</th>
+                <th class="numeric">Deductions</th>
+                <th class="numeric">Net Pay</th>
               </tr>
-            `).join('')}
-            <tr class="total-row">
-              <td colspan="3">TOTALS</td>
-              <td>${timeRecords.reduce((sum, r) => sum + Number(r.totalHours), 0).toFixed(1)} hrs</td>
-              <td>₱${timeRecords.reduce((sum, r) => sum + Number(r.regularPay), 0).toLocaleString()}</td>
-              <td>₱${timeRecords.reduce((sum, r) => sum + Number(r.overtimePay), 0).toLocaleString()}</td>
-              <td>₱${timeRecords.reduce((sum, r) => sum + Number(r.grossPay), 0).toLocaleString()}</td>
-              <td>₱${timeRecords.reduce((sum, r) => sum + Number(r.totalCommissions), 0).toLocaleString()}</td>
-              <td>₱${timeRecords.reduce((sum, r) => sum + Number(r.totalDeductions), 0).toLocaleString()}</td>
-              <td>₱${timeRecords.reduce((sum, r) => sum + Number(r.netPay), 0).toLocaleString()}</td>
-            </tr>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              ${timeRecords.map(record => `
+                <tr>
+                  <td class="employee-name">${record.employeeName}</td>
+                  <td class="period-cell">${record.payPeriod}</td>
+                  <td>${record.month} ${record.year}</td>
+                  <td class="numeric">${record.totalHours}</td>
+                  <td class="numeric">₱${Number(record.regularPay).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td class="numeric">₱${Number(record.overtimePay).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td class="numeric">₱${Number(record.grossPay).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td class="numeric">₱${Number(record.totalCommissions).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td class="numeric">₱${Number(record.totalDeductions).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td class="numeric">₱${Number(record.netPay).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+              `).join('')}
+              <tr class="total-row">
+                <td colspan="3" class="total-label">GRAND TOTALS</td>
+                <td class="numeric">${timeRecords.reduce((sum, r) => sum + Number(r.totalHours), 0).toFixed(1)}</td>
+                <td class="numeric">₱${timeRecords.reduce((sum, r) => sum + Number(r.regularPay), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td class="numeric">₱${timeRecords.reduce((sum, r) => sum + Number(r.overtimePay), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td class="numeric">₱${timeRecords.reduce((sum, r) => sum + Number(r.grossPay), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td class="numeric">₱${timeRecords.reduce((sum, r) => sum + Number(r.totalCommissions), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td class="numeric">₱${timeRecords.reduce((sum, r) => sum + Number(r.totalDeductions), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td class="numeric">₱${timeRecords.reduce((sum, r) => sum + Number(r.netPay), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              </tr>
+            </tbody>
+          </table>
+          
+          <!-- Summary Section -->
+          <div class="summary-section">
+            <div class="summary-item">
+              <div class="summary-label">Total Gross Pay</div>
+              <div class="summary-value">₱${timeRecords.reduce((sum, r) => sum + Number(r.grossPay), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">Total Deductions</div>
+              <div class="summary-value">₱${timeRecords.reduce((sum, r) => sum + Number(r.totalDeductions), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">Total Net Pay</div>
+              <div class="summary-value">₱${timeRecords.reduce((sum, r) => sum + Number(r.netPay), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            </div>
+          </div>
+          
+          <!-- Footer with Signatures -->
+          <div class="document-footer">
+            <div class="signatures">
+              <div class="signature-line">
+                <div class="signature-space"></div>
+                <div class="signature-label">ASMAR C. AHIL</div>
+                <div class="signature-role">HR Department / Co-Owner</div>
+              </div>
+              <div class="signature-line">
+                <div class="signature-space"></div>
+                <div class="signature-label">JEFFREY AHIL</div>
+                <div class="signature-role">Finance Officer</div>
+              </div>
+              <div class="signature-line">
+                <div class="signature-space"></div>
+                <div class="signature-label">JEFFREY AHIL</div>
+                <div class="signature-role">General Manager</div>
+              </div>
+            </div>
+            <div class="print-date">
+              Generated by Salary Counter System • ${new Date().toLocaleTimeString()}
+            </div>
+          </div>
+        </div>
       </body>
       </html>
     `
@@ -2025,8 +2780,8 @@ function Dashboard({ activeView, setActiveView }) {
               <td style="text-align: right;">${formatPeso(record.regularPay)}</td>
             </tr>
             <tr>
-              <td>Overtime Hours (${record.totalOvertimeHours} hrs)</td>
-              <td style="text-align: right;">${formatPeso(record.overtimePay)}</td>
+              <td>Overtime Hours (${Math.abs(parseFloat(record.totalOvertimeHours))} hrs)</td>
+              <td style="text-align: right;">${formatPeso(Math.abs(parseFloat(record.overtimePay)))}</td>
             </tr>
             <tr class="total-row">
               <td>Gross Pay</td>
@@ -2160,20 +2915,26 @@ function Dashboard({ activeView, setActiveView }) {
           </div>
           
           {selectedEmployee && (
-            <div className="selected-employee-badge">
-              <div className="badge-avatar">
-                <User size={20} />
+            <div className="selected-employee-section">
+              <div className="selected-employee-badge">
+                <div className="badge-avatar">
+                  <User size={20} />
+                </div>
+                <div className="badge-info">
+                  <span className="badge-name">{selectedEmployee.name}</span>
+                  <span className="badge-rate">{isManager ? formatPeso(selectedEmployee.ratePer9Hours) : censorRate()} per 9 hours</span>
+                </div>
+                <button className="clear-selection-btn" onClick={() => {
+                  setSelectedEmployee(null)
+                  setSearchQuery('')
+                  setShowTimeTracker(false)
+                }}>
+                  <X size={16} />
+                </button>
               </div>
-              <div className="badge-info">
-                <span className="badge-name">{selectedEmployee.name}</span>
-                <span className="badge-rate">{isManager ? formatPeso(selectedEmployee.ratePer9Hours) : censorRate()} per 9 hours</span>
-              </div>
-              <button className="clear-selection-btn" onClick={() => {
-                setSelectedEmployee(null)
-                setSearchQuery('')
-                setShowTimeTracker(false)
-              }}>
-                <X size={16} />
+              <button className="save-payroll-btn" onClick={handleSaveTimeEntry}>
+                <Save size={20} />
+                Save to Payroll
               </button>
             </div>
           )}
@@ -2266,16 +3027,17 @@ function Dashboard({ activeView, setActiveView }) {
                         }
                         const dayHours = calculateDayHours(entry)
                         const totalDayHours = dayHours.regularHours + dayHours.overtimeHours
+                        const rowStatus = getRowStatus(dayNum, entry)
                         
                         return (
-                          <tr key={day}>
+                          <tr key={day} className={rowStatus}>
                             <td className="day-cell">{day}</td>
                             <td>
                               <input
                                 type="text"
                                 value={entry.firstShiftIn || ''}
                                 onChange={(e) => handleTimeInputChange(dayNum, 'firstShiftIn', e.target.value)}
-                                onKeyPress={(e) => handleTimeInputKeyPress(e, dayNum, 'firstShiftIn')}
+                                onKeyDown={(e) => handleTimeInputKeyPress(e, dayNum, 'firstShiftIn')}
                                 data-day={dayNum}
                                 data-field="firstShiftIn"
                                 className="time-input"
@@ -2288,7 +3050,7 @@ function Dashboard({ activeView, setActiveView }) {
                                 type="text"
                                 value={entry.firstShiftOut || ''}
                                 onChange={(e) => handleTimeInputChange(dayNum, 'firstShiftOut', e.target.value)}
-                                onKeyPress={(e) => handleTimeInputKeyPress(e, dayNum, 'firstShiftOut')}
+                                onKeyDown={(e) => handleTimeInputKeyPress(e, dayNum, 'firstShiftOut')}
                                 data-day={dayNum}
                                 data-field="firstShiftOut"
                                 className="time-input"
@@ -2301,7 +3063,7 @@ function Dashboard({ activeView, setActiveView }) {
                                 type="text"
                                 value={entry.secondShiftIn || ''}
                                 onChange={(e) => handleTimeInputChange(dayNum, 'secondShiftIn', e.target.value)}
-                                onKeyPress={(e) => handleTimeInputKeyPress(e, dayNum, 'secondShiftIn')}
+                                onKeyDown={(e) => handleTimeInputKeyPress(e, dayNum, 'secondShiftIn')}
                                 data-day={dayNum}
                                 data-field="secondShiftIn"
                                 className="time-input"
@@ -2314,7 +3076,7 @@ function Dashboard({ activeView, setActiveView }) {
                                 type="text"
                                 value={entry.secondShiftOut || ''}
                                 onChange={(e) => handleTimeInputChange(dayNum, 'secondShiftOut', e.target.value)}
-                                onKeyPress={(e) => handleTimeInputKeyPress(e, dayNum, 'secondShiftOut')}
+                                onKeyDown={(e) => handleTimeInputKeyPress(e, dayNum, 'secondShiftOut')}
                                 data-day={dayNum}
                                 data-field="secondShiftOut"
                                 className="time-input"
@@ -2327,7 +3089,7 @@ function Dashboard({ activeView, setActiveView }) {
                                 type="text"
                                 value={entry.otTimeIn || ''}
                                 onChange={(e) => handleTimeInputChange(dayNum, 'otTimeIn', e.target.value)}
-                                onKeyPress={(e) => handleTimeInputKeyPress(e, dayNum, 'otTimeIn')}
+                                onKeyDown={(e) => handleTimeInputKeyPress(e, dayNum, 'otTimeIn')}
                                 data-day={dayNum}
                                 data-field="otTimeIn"
                                 className="time-input"
@@ -2340,7 +3102,7 @@ function Dashboard({ activeView, setActiveView }) {
                                 type="text"
                                 value={entry.otTimeOut || ''}
                                 onChange={(e) => handleTimeInputChange(dayNum, 'otTimeOut', e.target.value)}
-                                onKeyPress={(e) => handleTimeInputKeyPress(e, dayNum, 'otTimeOut')}
+                                onKeyDown={(e) => handleTimeInputKeyPress(e, dayNum, 'otTimeOut')}
                                 data-day={dayNum}
                                 data-field="otTimeOut"
                                 className="time-input"
@@ -2521,11 +3283,11 @@ function Dashboard({ activeView, setActiveView }) {
                         <div className="summary-section">
                           <div className="section-title">Base Earnings</div>
                           <div className="summary-row">
-                            <span>Regular Pay</span>
+                            <span>Regular Pay ({calculateTotalEarnings().regularHours} hrs)</span>
                             <strong>{formatPeso(calculateTotalEarnings().regularPay)}</strong>
                           </div>
                           <div className="summary-row">
-                            <span>Overtime Pay</span>
+                            <span>Overtime Pay ({calculateTotalEarnings().totalOvertimeHours} hrs)</span>
                             <strong>{formatPeso(calculateTotalEarnings().overtimePay)}</strong>
                           </div>
                           <div className="summary-row highlight">
@@ -2535,7 +3297,7 @@ function Dashboard({ activeView, setActiveView }) {
                         </div>
 
                         <div className="summary-section">
-                          <div className="section-title">Additions</div>
+                          <div className="section-title">Commissions</div>
                           {rushTarpCount > 0 && (
                             <div className="summary-row positive">
                               <span>Rush Tarp ({rushTarpCount} × ₱{rushTarpCommissionRate})</span>
@@ -2607,15 +3369,6 @@ function Dashboard({ activeView, setActiveView }) {
 
           </div>
         </div>
-
-        {selectedEmployee && (
-          <div className="save-payroll-container">
-            <button className="save-payroll-btn" onClick={handleSaveTimeEntry}>
-              <Save size={20} />
-              Save to Payroll
-            </button>
-          </div>
-        )}
       </div>
       </>
     )
@@ -2645,9 +3398,14 @@ function Dashboard({ activeView, setActiveView }) {
             </button>
             
             <div className="dashboard-header">
-              <div>
-                <h1>Payroll Timeline History</h1>
-                <p className="subtitle">View payroll records by period</p>
+              <div className="header-content">
+                <div className="header-icon-wrapper">
+                  <Calendar size={22} />
+                </div>
+                <div>
+                  <h1>Payroll Timeline History</h1>
+                  <p className="subtitle">View payroll records by period</p>
+                </div>
               </div>
             </div>
             
@@ -2790,9 +3548,14 @@ function Dashboard({ activeView, setActiveView }) {
         <SuccessPopup />
       <div className="dashboard">
         <div className="dashboard-header">
-          <div>
-            <h1>Payroll Records</h1>
-            <p className="subtitle">View all saved payroll records</p>
+          <div className="header-content">
+            <div className="header-icon-wrapper">
+              <Wallet size={22} />
+            </div>
+            <div>
+              <h1>Payroll Records</h1>
+              <p className="subtitle">View all saved payroll records</p>
+            </div>
           </div>
           <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap'}}>
             {timeRecords.length > 0 && (
@@ -2834,65 +3597,66 @@ function Dashboard({ activeView, setActiveView }) {
           </div>
         ) : (
           <div className="payroll-container">
-            <div className="payroll-summary-cards">
-              <div className="stat-card primary">
-                <div className="stat-icon">
-                  <User size={24} />
+            {/* Redesigned Summary Cards */}
+            <div className="payroll-summary-grid">
+              <div className="payroll-summary-card primary-card">
+                <div className="summary-card-header">
+                  <div className="summary-card-icon">
+                    <User size={20} />
+                  </div>
+                  <span className="summary-card-label">Total Records</span>
                 </div>
-                <div className="stat-content">
-                  <span className="stat-label">Total Records</span>
-                  <span className="stat-value">{timeRecords.length}</span>
-                </div>
+                <div className="summary-card-value">{timeRecords.length}</div>
+                <div className="summary-card-footer">Active payroll entries</div>
               </div>
 
-              <div className="stat-card">
-                <div className="stat-icon">
-                  <DollarSign size={24} />
+              <div className="payroll-summary-card">
+                <div className="summary-card-header">
+                  <div className="summary-card-icon">
+                    <Clock size={20} />
+                  </div>
+                  <span className="summary-card-label">Total Hours</span>
                 </div>
-                <div className="stat-content">
-                  <span className="stat-label">Total Gross Pay</span>
-                  <span className="stat-value">{formatPeso(timeRecords.reduce((sum, r) => sum + Number(r.grossPay), 0))}</span>
-                </div>
+                <div className="summary-card-value">{timeRecords.reduce((sum, r) => sum + Number(r.totalHours), 0).toFixed(1)}</div>
+                <div className="summary-card-footer">Combined work hours</div>
               </div>
 
-              <div className="stat-card">
-                <div className="stat-icon">
-                  <TrendingUp size={24} />
+              <div className="payroll-summary-card">
+                <div className="summary-card-header">
+                  <div className="summary-card-icon">
+                    <DollarSign size={20} />
+                  </div>
+                  <span className="summary-card-label">Gross Pay</span>
                 </div>
-                <div className="stat-content">
-                  <span className="stat-label">Total Net Pay</span>
-                  <span className="stat-value">{formatPeso(timeRecords.reduce((sum, r) => sum + Number(r.netPay), 0))}</span>
-                </div>
+                <div className="summary-card-value">{formatPeso(timeRecords.reduce((sum, r) => sum + Number(r.grossPay), 0))}</div>
+                <div className="summary-card-footer">Before deductions</div>
               </div>
 
-              <div className="stat-card">
-                <div className="stat-icon">
-                  <Clock size={24} />
+              <div className="payroll-summary-card highlight-card">
+                <div className="summary-card-header">
+                  <div className="summary-card-icon">
+                    <TrendingUp size={20} />
+                  </div>
+                  <span className="summary-card-label">Net Pay</span>
                 </div>
-                <div className="stat-content">
-                  <span className="stat-label">Total Hours</span>
-                  <span className="stat-value">{timeRecords.reduce((sum, r) => sum + Number(r.totalHours), 0).toFixed(1)} hrs</span>
-                </div>
+                <div className="summary-card-value">{formatPeso(timeRecords.reduce((sum, r) => sum + Number(r.netPay), 0))}</div>
+                <div className="summary-card-footer">Total payout amount</div>
               </div>
             </div>
 
+            {/* Redesigned Compact Table */}
             <div className="payroll-records-section">
               <h2>All Payroll Records</h2>
               <div className="payroll-table-container">
-                <table className="payroll-table">
+                <table className="payroll-table compact-table">
                   <thead>
                     <tr>
                       <th>Employee</th>
                       <th>Period</th>
-                      <th>Month/Year</th>
-                      <th>Total Hours</th>
-                      <th>Regular Pay</th>
-                      <th>Overtime Pay</th>
-                      <th>Gross Pay</th>
-                      <th>Commissions</th>
-                      <th>Deductions</th>
-                      <th>Status</th>
+                      <th>Hours</th>
+                      <th>Gross</th>
                       <th>Net Pay</th>
+                      <th>Status</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
@@ -2901,47 +3665,59 @@ function Dashboard({ activeView, setActiveView }) {
                       <tr key={record.id}>
                         <td className="employee-name-cell">
                           <div className="employee-cell-content">
-                            <User size={16} />
-                            <span>{record.employeeName}</span>
+                            <div className="employee-avatar-tiny">
+                              <User size={14} />
+                            </div>
+                            <div className="employee-cell-info">
+                              <span className="employee-name">{record.employeeName}</span>
+                              <span className="employee-meta">{record.month} {record.year}</span>
+                            </div>
                           </div>
                         </td>
-                        <td>Days {record.payPeriod}</td>
-                        <td>{record.month} {record.year}</td>
-                        <td>{record.totalHours} hrs</td>
-                        <td>{formatPeso(record.regularPay)}</td>
-                        <td>{formatPeso(record.overtimePay)}</td>
-                        <td className="highlight-cell">{formatPeso(record.grossPay)}</td>
-                        <td className="positive-cell">+{formatPeso(record.totalCommissions)}</td>
-                        <td className="negative-cell">-{formatPeso(record.totalDeductions)}</td>
+                        <td>
+                          <span className="period-badge">Days {record.payPeriod}</span>
+                        </td>
+                        <td>
+                          <div className="hours-cell">
+                            <span className="hours-value">{record.totalHours}</span>
+                            <span className="hours-label">hrs</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="pay-cell">
+                            <span className="pay-value">{formatPeso(record.grossPay)}</span>
+                            <span className="pay-breakdown">+{formatPeso(record.totalCommissions)} | -{formatPeso(record.totalDeductions)}</span>
+                          </div>
+                        </td>
+                        <td className="net-pay-cell-compact">
+                          <span className="net-pay-value">{formatPeso(record.netPay)}</span>
+                        </td>
                         <td>
                           {record.processed ? (
-                            <div className="processed-badge">Processed</div>
+                            <span className="status-badge-compact processed">Processed</span>
                           ) : (
-                            <div className="pending-badge">Pending</div>
+                            <span className="status-badge-compact pending">Pending</span>
                           )}
                         </td>
-                        <td className="net-pay-cell">
-                          {formatPeso(record.netPay)}
-                        </td>
                         <td>
-                          <div className="action-buttons">
+                          <div className="action-buttons-compact">
                             <button 
-                              className="icon-btn view-btn"
+                              className="icon-btn-compact view-btn"
                               onClick={() => setViewingPayrollRecord(record)}
                               title="View Details"
                             >
-                              <FileText size={16} />
+                              <FileText size={14} />
                             </button>
                             <button 
-                              className="icon-btn edit-btn"
+                              className="icon-btn-compact edit-btn"
                               onClick={() => handleEditRecord(record)}
                               title="Edit Record"
                               disabled={record.processed}
                             >
-                              <Edit2 size={16} />
+                              <Edit2 size={14} />
                             </button>
                             <button 
-                              className="icon-btn delete-btn"
+                              className="icon-btn-compact delete-btn"
                               onClick={async () => {
                                 if (confirm(`Delete payroll record for ${record.employeeName}?`)) {
                                   try {
@@ -2956,7 +3732,7 @@ function Dashboard({ activeView, setActiveView }) {
                               }}
                               title="Delete Record"
                             >
-                              <Trash2 size={16} />
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </td>
@@ -3106,120 +3882,209 @@ function Dashboard({ activeView, setActiveView }) {
             <X size={20} />
             <span>Back to Cash Advance Records</span>
           </button>
-          <div>
-            <h1>Cash Advance Timeline - {viewingCashAdvanceEmployee.name}</h1>
-            <p className="subtitle">Complete cash advance history and payments</p>
+          <div className="header-content">
+            <div className="header-icon-wrapper">
+              <CreditCard size={22} />
+            </div>
+            <div>
+              <h1>Cash Advance Timeline - {viewingCashAdvanceEmployee.name}</h1>
+              <p className="subtitle">Complete cash advance history and payments</p>
+            </div>
           </div>
         </div>
 
-        <div className="timeline-page-content">
-                <div className="employee-detail-header">
-                  <div className="employee-avatar-large">
-                    <User size={32} />
-                  </div>
-                  <div>
-                    <h3>{viewingCashAdvanceEmployee.name}</h3>
-                    <p className="period-info">Complete Cash Advance History</p>
-                  </div>
+        <div className="cash-advance-timeline-container">
+          {/* Employee Summary Card */}
+          <div className="ca-employee-card">
+            <div className="ca-card-left">
+              <div className="ca-employee-avatar-large">
+                {viewingCashAdvanceEmployee.photo ? (
+                  <img src={viewingCashAdvanceEmployee.photo} alt={viewingCashAdvanceEmployee.name} />
+                ) : (
+                  <User size={56} />
+                )}
+              </div>
+              <div className="ca-employee-info">
+                <h2>{viewingCashAdvanceEmployee.name}</h2>
+                <div className="ca-employee-meta">
+                  <span className="ca-meta-item">
+                    <Mail size={14} />
+                    {viewingCashAdvanceEmployee.email || 'No email'}
+                  </span>
+                  <span className="ca-meta-item">
+                    <Phone size={14} />
+                    {viewingCashAdvanceEmployee.phone || 'No phone'}
+                  </span>
                 </div>
+              </div>
+            </div>
+            <div className="ca-card-stats">
+              {(() => {
+                const employeeRecords = cashAdvanceRecords.filter(r => r.employeeId === viewingCashAdvanceEmployee.id)
+                const totalAdvanced = employeeRecords.reduce((sum, r) => sum + r.amount, 0)
+                const totalBalance = employeeRecords.reduce((sum, r) => sum + r.balance, 0)
+                const totalPaid = totalAdvanced - totalBalance
+                
+                return (
+                  <>
+                    <div className="ca-stat-box">
+                      <span className="ca-stat-label">Total Advanced</span>
+                      <span className="ca-stat-value">{formatPeso(totalAdvanced)}</span>
+                    </div>
+                    <div className="ca-stat-box">
+                      <span className="ca-stat-label">Total Paid</span>
+                      <span className="ca-stat-value">{formatPeso(totalPaid)}</span>
+                    </div>
+                    <div className="ca-stat-box highlight">
+                      <span className="ca-stat-label">Current Balance</span>
+                      <span className="ca-stat-value">{formatPeso(totalBalance)}</span>
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+            <div className="ca-card-actions">
+              <button 
+                className="ca-action-btn primary"
+                onClick={() => setShowAddCashAdvanceModal(true)}
+              >
+                <Plus size={18} />
+                Add Cash Advance
+              </button>
+              <button 
+                className="ca-action-btn secondary"
+                onClick={() => {
+                  const employeeRecords = cashAdvanceRecords.filter(r => r.employeeId === viewingCashAdvanceEmployee.id && r.balance > 0)
+                  if (employeeRecords.length === 0) {
+                    showSuccess('No Outstanding Balance', 'This employee has no outstanding cash advances.', [])
+                    return
+                  }
+                  
+                  const recordId = employeeRecords[0].id
+                  const currentBalance = employeeRecords[0].balance
+                  const payment = prompt(`Enter payment amount\nCurrent Balance: ${formatPeso(currentBalance)}`)
+                  
+                  if (payment && !isNaN(payment) && Number(payment) > 0) {
+                    if (Number(payment) > currentBalance) {
+                      showSuccess('Invalid Amount', 'Payment amount cannot exceed balance', [
+                        { label: 'Current Balance', value: formatPeso(currentBalance) },
+                        { label: 'Attempted Payment', value: formatPeso(payment) }
+                      ])
+                    } else {
+                      handleAddPayment(recordId, payment)
+                      showSuccess(
+                        'Payment Added!',
+                        `Payment of ${formatPeso(payment)} recorded successfully`,
+                        [
+                          { label: 'Payment Amount', value: formatPeso(payment) },
+                          { label: 'New Balance', value: formatPeso(currentBalance - Number(payment)) }
+                        ]
+                      )
+                    }
+                  }
+                }}
+              >
+                <DollarSign size={18} />
+                Add Payment
+              </button>
+            </div>
+          </div>
 
-                {/* Add New Cash Advance Button */}
-                <button 
-                  className="add-cash-advance-timeline-btn"
-                  onClick={() => setShowAddCashAdvanceModal(true)}
-                >
-                  <Plus size={18} />
-                  Add New Cash Advance
-                </button>
-
+          {/* Timeline Table */}
           {cashAdvanceRecords.filter(r => r.employeeId === viewingCashAdvanceEmployee.id).length === 0 ? (
-            <div className="empty-timeline">
-              <CreditCard size={48} />
-              <p>No cash advance records for this employee</p>
+            <div className="ca-empty-state">
+              <CreditCard size={64} />
+              <h3>No Cash Advance Records</h3>
+              <p>This employee has no cash advance history yet</p>
             </div>
           ) : (
-            <div className="timeline">
-              {cashAdvanceRecords
-                .filter(r => r.employeeId === viewingCashAdvanceEmployee.id)
-                .sort((a, b) => new Date(b.date) - new Date(a.date))
-                .map(record => (
-                        <div key={record.id} className="timeline-item">
-                          <div className="timeline-marker"></div>
-                          <div className="timeline-card">
-                            <div className="timeline-header">
-                              <div className="timeline-date">
-                                <Calendar size={16} />
-                                <span>{new Date(record.date).toLocaleDateString('en-US', { 
-                                  year: 'numeric', 
-                                  month: 'long', 
-                                  day: 'numeric' 
-                                })}</span>
-                              </div>
-                              <button 
-                                className="icon-btn delete-btn"
-                                onClick={async () => {
-                                  if (confirm(`Delete this cash advance record?`)) {
-                                    try {
-                                      await deleteCashAdvanceRecord(record.id)
-                                      setCashAdvanceRecords(cashAdvanceRecords.filter(r => r.id !== record.id))
-                                      showSuccess('Record Deleted', 'Cash advance record has been deleted.', [])
-                                    } catch (error) {
-                                      console.error('Error deleting cash advance:', error)
-                                      showSuccess('Error', 'Failed to delete record. Please try again.', [])
-                                    }
-                                  }
-                                }}
-                                title="Delete Record"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-
-                            <div className="timeline-amounts">
-                              <div className="timeline-amount-row">
-                                <span className="timeline-label">Amount Advanced:</span>
-                                <span className="timeline-value">{formatPeso(record.amount)}</span>
-                              </div>
-                              <div className="timeline-amount-row">
-                                <span className="timeline-label">Total Paid:</span>
-                                <span className="timeline-value positive">{formatPeso(record.amount - record.balance)}</span>
-                              </div>
-                              <div className="timeline-amount-row highlight">
-                                <span className="timeline-label">Balance:</span>
-                                <span className="timeline-value">{formatPeso(record.balance)}</span>
-                              </div>
-                            </div>
-
-                            {record.notes && (
-                              <div className="timeline-notes">
-                                <span className="notes-label">Notes:</span>
-                                <p>{record.notes}</p>
-                              </div>
+            <div className="ca-table-container">
+              <table className="ca-timeline-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Advanced</th>
+                    <th>Paid</th>
+                    <th>Balance</th>
+                    <th>Notes</th>
+                    <th>Payments</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cashAdvanceRecords
+                    .filter(r => r.employeeId === viewingCashAdvanceEmployee.id)
+                    .sort((a, b) => new Date(b.date) - new Date(a.date))
+                    .map(record => (
+                      <tr key={record.id}>
+                        <td>
+                          <div className="ca-date-cell">
+                            <Calendar size={14} />
+                            <span>{new Date(record.date).toLocaleDateString('en-US', { 
+                              month: 'short', 
+                              day: 'numeric',
+                              year: 'numeric'
+                            })}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <span className="ca-amount">{formatPeso(record.amount)}</span>
+                        </td>
+                        <td>
+                          <span className="ca-amount paid">{formatPeso(record.amount - record.balance)}</span>
+                        </td>
+                        <td>
+                          <span className="ca-amount balance">{formatPeso(record.balance)}</span>
+                        </td>
+                        <td>
+                          <div className="ca-notes-cell">
+                            {record.notes ? (
+                              <span className="ca-notes-text" title={record.notes}>
+                                {record.notes.length > 30 ? record.notes.substring(0, 30) + '...' : record.notes}
+                              </span>
+                            ) : (
+                              <span className="ca-no-notes">No notes</span>
                             )}
-
-                            {record.payments.length > 0 && (
-                              <div className="timeline-payments">
-                                <h5>Payment History</h5>
-                                <div className="timeline-payments-list">
+                          </div>
+                        </td>
+                        <td>
+                          <div className="ca-payments-cell">
+                            {record.payments.length > 0 ? (
+                              <div className="ca-payments-preview">
+                                <span className="ca-payments-badge">{record.payments.length} payment{record.payments.length > 1 ? 's' : ''}</span>
+                                <div className="ca-payments-tooltip">
                                   {record.payments.map(payment => (
-                                    <div key={payment.id} className="timeline-payment-item">
-                                      <div className="payment-info">
-                                        <Calendar size={14} />
-                                        <span>{new Date(payment.date).toLocaleDateString()}</span>
-                                        {payment.source && (
-                                          <span className="payment-source">({payment.source})</span>
-                                        )}
-                                      </div>
-                                      <span className="payment-amount">{formatPeso(payment.amount)}</span>
+                                    <div key={payment.id} className="ca-payment-item">
+                                      <span>{new Date(payment.date).toLocaleDateString()}</span>
+                                      <span>{formatPeso(payment.amount)}</span>
                                     </div>
                                   ))}
                                 </div>
                               </div>
+                            ) : (
+                              <span className="ca-no-payments">No payments</span>
                             )}
-
+                          </div>
+                        </td>
+                        <td>
+                          {record.balance === 0 ? (
+                            <span className="ca-status-badge paid">
+                              <CheckCircle size={14} />
+                              Paid
+                            </span>
+                          ) : (
+                            <span className="ca-status-badge outstanding">
+                              <AlertCircle size={14} />
+                              Outstanding
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <div className="ca-action-buttons">
                             {record.balance > 0 && (
                               <button 
-                                className="add-payment-btn-small"
+                                className="ca-icon-btn pay"
                                 onClick={() => {
                                   const payment = prompt(`Enter payment amount\nCurrent Balance: ${formatPeso(record.balance)}`)
                                   if (payment && !isNaN(payment) && Number(payment) > 0) {
@@ -3241,21 +4106,35 @@ function Dashboard({ activeView, setActiveView }) {
                                     }
                                   }
                                 }}
+                                title="Add Payment"
                               >
-                                <Plus size={14} />
-                                Add Payment
+                                <DollarSign size={14} />
                               </button>
                             )}
-
-                            {record.balance === 0 && (
-                              <div className="timeline-paid-badge">
-                                <CheckCircle size={16} />
-                                <span>Fully Paid</span>
-                              </div>
-                            )}
+                            <button 
+                              className="ca-icon-btn delete"
+                              onClick={async () => {
+                                if (confirm(`Delete this cash advance record of ${formatPeso(record.amount)}?`)) {
+                                  try {
+                                    await deleteCashAdvanceRecord(record.id)
+                                    setCashAdvanceRecords(cashAdvanceRecords.filter(r => r.id !== record.id))
+                                    showSuccess('Record Deleted', 'Cash advance record has been deleted.', [])
+                                  } catch (error) {
+                                    console.error('Error deleting cash advance:', error)
+                                    showSuccess('Error', 'Failed to delete record. Please try again.', [])
+                                  }
+                                }
+                              }}
+                              title="Delete"
+                            >
+                              <Trash2 size={14} />
+                            </button>
                           </div>
-                  </div>
-                ))}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -3368,9 +4247,14 @@ function Dashboard({ activeView, setActiveView }) {
         <SuccessPopup />
       <div className="dashboard">
         <div className="dashboard-header">
-          <div>
-            <h1>Cash Advance Records</h1>
-            <p className="subtitle">Track employee cash advances and payments</p>
+          <div className="header-content">
+            <div className="header-icon-wrapper">
+              <CreditCard size={22} />
+            </div>
+            <div>
+              <h1>Cash Advance Records</h1>
+              <p className="subtitle">Track employee cash advances and payments</p>
+            </div>
           </div>
         </div>
 
@@ -3382,113 +4266,129 @@ function Dashboard({ activeView, setActiveView }) {
           </div>
         ) : (
           <div className="cash-advance-container">
-            <div className="payroll-summary-cards">
-              <div className="stat-card primary">
-                <div className="stat-icon">
-                  <User size={24} />
+            {/* Redesigned Summary Cards */}
+            <div className="payroll-summary-grid">
+              <div className="payroll-summary-card primary-card">
+                <div className="summary-card-header">
+                  <div className="summary-card-icon">
+                    <User size={20} />
+                  </div>
+                  <span className="summary-card-label">Total Records</span>
                 </div>
-                <div className="stat-content">
-                  <span className="stat-label">Total Records</span>
-                  <span className="stat-value">{cashAdvanceRecords.length}</span>
-                </div>
+                <div className="summary-card-value">{cashAdvanceRecords.length}</div>
+                <div className="summary-card-footer">Active cash advances</div>
               </div>
 
-              <div className="stat-card">
-                <div className="stat-icon">
-                  <DollarSign size={24} />
+              <div className="payroll-summary-card">
+                <div className="summary-card-header">
+                  <div className="summary-card-icon">
+                    <DollarSign size={20} />
+                  </div>
+                  <span className="summary-card-label">Total Advanced</span>
                 </div>
-                <div className="stat-content">
-                  <span className="stat-label">Total Advanced</span>
-                  <span className="stat-value">{formatPeso(cashAdvanceRecords.reduce((sum, r) => sum + r.amount, 0))}</span>
-                </div>
+                <div className="summary-card-value">{formatPeso(cashAdvanceRecords.reduce((sum, r) => sum + r.amount, 0))}</div>
+                <div className="summary-card-footer">Amount given to employees</div>
               </div>
 
-              <div className="stat-card">
-                <div className="stat-icon">
-                  <TrendingUp size={24} />
+              <div className="payroll-summary-card">
+                <div className="summary-card-header">
+                  <div className="summary-card-icon">
+                    <TrendingUp size={20} />
+                  </div>
+                  <span className="summary-card-label">Total Paid</span>
                 </div>
-                <div className="stat-content">
-                  <span className="stat-label">Total Paid</span>
-                  <span className="stat-value">{formatPeso(cashAdvanceRecords.reduce((sum, r) => sum + (r.amount - r.balance), 0))}</span>
-                </div>
+                <div className="summary-card-value">{formatPeso(cashAdvanceRecords.reduce((sum, r) => sum + (r.amount - r.balance), 0))}</div>
+                <div className="summary-card-footer">Amount recovered</div>
               </div>
 
-              <div className="stat-card">
-                <div className="stat-icon">
-                  <Clock size={24} />
+              <div className="payroll-summary-card highlight-card">
+                <div className="summary-card-header">
+                  <div className="summary-card-icon">
+                    <Clock size={20} />
+                  </div>
+                  <span className="summary-card-label">Outstanding</span>
                 </div>
-                <div className="stat-content">
-                  <span className="stat-label">Outstanding Balance</span>
-                  <span className="stat-value">{formatPeso(cashAdvanceRecords.reduce((sum, r) => sum + r.balance, 0))}</span>
-                </div>
+                <div className="summary-card-value">{formatPeso(cashAdvanceRecords.reduce((sum, r) => sum + r.balance, 0))}</div>
+                <div className="summary-card-footer">Remaining balance</div>
               </div>
             </div>
 
+            {/* Compact Table View */}
             <div className="payroll-records-section">
-              <h2>All Employees Cash Advance Status</h2>
-              <div className="cash-advance-grid">
-                {employees.map(employee => {
-                  const employeeRecords = cashAdvanceRecords.filter(r => r.employeeId === employee.id)
-                  const totalBalance = employeeRecords.reduce((sum, r) => sum + r.balance, 0)
-                  const totalAdvanced = employeeRecords.reduce((sum, r) => sum + r.amount, 0)
-                  const totalPaid = totalAdvanced - totalBalance
+              <h2>Employee Cash Advance Status</h2>
+              <div className="payroll-table-container">
+                <table className="payroll-table compact-table cash-advance-table">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Records</th>
+                      <th>Advanced</th>
+                      <th>Paid</th>
+                      <th>Balance</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees.map(employee => {
+                      const employeeRecords = cashAdvanceRecords.filter(r => r.employeeId === employee.id)
+                      const totalBalance = employeeRecords.reduce((sum, r) => sum + r.balance, 0)
+                      const totalAdvanced = employeeRecords.reduce((sum, r) => sum + r.amount, 0)
+                      const totalPaid = totalAdvanced - totalBalance
 
-                  return (
-                    <div key={employee.id} className="cash-advance-card">
-                      <div className="cash-advance-header">
-                        <div className="employee-info-large">
-                          <div className="employee-avatar">
-                            <User size={24} />
-                          </div>
-                          <div>
-                            <h3>{employee.name}</h3>
-                            <span className="date-text">{employeeRecords.length} advance(s)</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="cash-advance-amounts">
-                        <div className="amount-item">
-                          <span className="amount-label">Total Advanced</span>
-                          <span className="amount-value">{formatPeso(totalAdvanced)}</span>
-                        </div>
-                        <div className="amount-item">
-                          <span className="amount-label">Total Paid</span>
-                          <span className="amount-value positive">{formatPeso(totalPaid)}</span>
-                        </div>
-                        <div className="amount-item highlight">
-                          <span className="amount-label">Balance</span>
-                          <span className="amount-value">{formatPeso(totalBalance)}</span>
-                        </div>
-                      </div>
-
-                      <div className="payment-section">
-                        <button 
-                          className="add-payment-btn"
-                          onClick={() => {
-                            setViewingCashAdvanceEmployee(employee)
-                            setCashAdvanceTimelineView(true)
-                          }}
-                        >
-                          <FileText size={16} />
-                          View Cash Advance Records
-                        </button>
-                      </div>
-
-                      {totalBalance === 0 && totalAdvanced > 0 && (
-                        <div className="paid-badge">
-                          <span>✓ All Paid</span>
-                        </div>
-                      )}
-                      
-                      {employeeRecords.length === 0 && (
-                        <div className="no-advance-badge">
-                          <span>No Cash Advances</span>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+                      return (
+                        <tr key={employee.id}>
+                          <td className="employee-name-cell">
+                            <div className="employee-cell-content">
+                              <div className="employee-avatar-tiny">
+                                <User size={14} />
+                              </div>
+                              <div className="employee-cell-info">
+                                <span className="employee-name">{employee.name}</span>
+                                <span className="employee-meta">{employeeRecords.length} advance(s)</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <span className="record-count-badge">{employeeRecords.length}</span>
+                          </td>
+                          <td>
+                            <span className="amount-compact">{formatPeso(totalAdvanced)}</span>
+                          </td>
+                          <td>
+                            <span className="amount-compact positive">{formatPeso(totalPaid)}</span>
+                          </td>
+                          <td className="balance-cell-compact">
+                            <span className="balance-value">{formatPeso(totalBalance)}</span>
+                          </td>
+                          <td>
+                            {totalBalance === 0 && totalAdvanced > 0 ? (
+                              <span className="status-badge-compact paid">Paid</span>
+                            ) : totalBalance > 0 ? (
+                              <span className="status-badge-compact outstanding">Outstanding</span>
+                            ) : (
+                              <span className="status-badge-compact no-advance">No Advance</span>
+                            )}
+                          </td>
+                          <td>
+                            <div className="action-buttons-compact">
+                              <button 
+                                className="icon-btn-compact view-btn"
+                                onClick={() => {
+                                  setViewingCashAdvanceEmployee(employee)
+                                  setCashAdvanceTimelineView(true)
+                                }}
+                                title="View Records"
+                              >
+                                <FileText size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
 
@@ -3716,9 +4616,14 @@ function Dashboard({ activeView, setActiveView }) {
         <SuccessPopup />
         <div className="dashboard">
           <div className="dashboard-header">
-            <div>
-              <h1>Day Off Management</h1>
-              <p className="subtitle">Manage employee paid day offs</p>
+            <div className="header-content">
+              <div className="header-icon-wrapper">
+                <Calendar size={22} />
+              </div>
+              <div>
+                <h1>Day Off Management</h1>
+                <p className="subtitle">Manage employee paid day offs</p>
+              </div>
             </div>
             <div style={{display: 'flex', gap: '10px', flexWrap: 'wrap'}}>
               <button 
@@ -3763,23 +4668,30 @@ function Dashboard({ activeView, setActiveView }) {
                   <span>Reset All</span>
                 </button>
               )}
-              <button className="add-employee-button" onClick={() => setShowAddDayOffModal(true)}>
+              <button className="add-employee-button" onClick={() => {
+                // Reset calendar to current month when opening modal
+                const now = new Date()
+                setCalendarCurrentYear(now.getFullYear())
+                setCalendarCurrentMonth(now.getMonth())
+                setShowAddDayOffModal(true)
+              }}>
                 <Plus size={20} />
                 <span>Add Day Off</span>
               </button>
             </div>
           </div>
 
-          <div className="info-card">
-            <p className="info-card-title">How Day Off Works:</p>
-            <ul className="info-card-list">
-              <li>Each qualified day off is paid for 9 hours of work</li>
-              <li>Day off hours are automatically added to the payroll calculation</li>
-              <li><strong>Auto Setup:</strong> Creates 1 day off per employee per month, spread evenly to ensure coverage</li>
-              <li><strong>Absences are auto-detected:</strong> Days with 0 hours in the salary counter count as absences</li>
-              <li>If an employee has {maxAbsencesForDayOff} or more absences in a pay period, their day off will not be paid</li>
-              <li>You can adjust the absence threshold in Settings</li>
-            </ul>
+          {/* Compact Info Card */}
+          <div className="dayoff-info-compact">
+            <div className="info-compact-header">
+              <AlertCircle size={16} />
+              <span>How Day Off Works</span>
+            </div>
+            <div className="info-compact-content">
+              <span>• 9 hrs paid per qualified day off</span>
+              <span>• Auto-detected absences</span>
+              <span>• {maxAbsencesForDayOff}+ absences = not qualified</span>
+            </div>
           </div>
 
           {dayOffRecords.length === 0 ? (
@@ -3789,73 +4701,83 @@ function Dashboard({ activeView, setActiveView }) {
               <p>Click "Add Day Off" to create a new record</p>
             </div>
           ) : (
-            <div className="payroll-table-container">
-              <table className="payroll-table">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Date</th>
-                    <th>Day of Week</th>
-                    <th>Month/Year</th>
-                    <th>Absences</th>
-                    <th>Status</th>
-                    <th>Hours Paid</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dayOffRecords.map(record => {
-                    const dayOfWeek = new Date(record.date).toLocaleDateString('en-US', { weekday: 'long' })
-                    return (
-                      <tr key={record.id}>
-                        <td>
-                          <div className="employee-info">
-                            <div className="employee-avatar-small">
-                              <User size={16} />
+            <div className="dayoff-table-section">
+              <div className="payroll-table-container">
+                <table className="payroll-table compact-table dayoff-table">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Date</th>
+                      <th>Day</th>
+                      <th>Period</th>
+                      <th>Status</th>
+                      <th>Hours</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dayOffRecords.map(record => {
+                      const dayOfWeek = new Date(record.date).toLocaleDateString('en-US', { weekday: 'short' })
+                      return (
+                        <tr key={record.id}>
+                          <td>
+                            <div className="employee-cell-content">
+                              <div className="employee-avatar-tiny">
+                                <User size={14} />
+                              </div>
+                              <div className="employee-cell-info">
+                                <span className="employee-name">{record.employeeName}</span>
+                                <span className="employee-meta">{record.month} {record.year}</span>
+                              </div>
                             </div>
-                            <span>{record.employeeName}</span>
-                          </div>
-                        </td>
-                        <td>{new Date(record.date).toLocaleDateString()}</td>
-                        <td>
-                          <span className="day-of-week-badge">{dayOfWeek}</span>
-                        </td>
-                        <td>{record.month} {record.year}</td>
-                        <td>
-                          <span className={record.absenceCount >= maxAbsencesForDayOff ? 'status-badge danger' : 'status-badge success'}>
-                            {record.absenceCount} absence{record.absenceCount !== 1 ? 's' : ''}
-                          </span>
-                        </td>
-                        <td>
-                          {record.isQualified ? (
-                            <span className="status-badge success">Qualified</span>
-                          ) : (
-                            <span className="status-badge danger">Not Qualified</span>
-                          )}
-                        </td>
-                        <td>
-                          <strong>{record.hoursPaid || 0} hours</strong>
-                        </td>
-                        <td>
-                          <div className="action-buttons">
-                            <button 
-                              className="icon-btn delete-btn"
-                              onClick={() => {
-                                if (confirm(`Delete day off record for ${record.employeeName}?`)) {
-                                  handleDeleteDayOff(record.id)
-                                }
-                              }}
-                              title="Delete Day Off"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                          </td>
+                          <td>
+                            <span className="date-compact">{new Date(record.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                          </td>
+                          <td>
+                            <span className="day-badge">{dayOfWeek}</span>
+                          </td>
+                          <td>
+                            <div className="dayoff-status-cell">
+                              <span className={`absence-badge ${record.absenceCount >= maxAbsencesForDayOff ? 'danger' : 'success'}`}>
+                                {record.absenceCount} abs
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            {record.isQualified ? (
+                              <span className="status-badge-compact qualified">Qualified</span>
+                            ) : (
+                              <span className="status-badge-compact not-qualified">Not Qualified</span>
+                            )}
+                          </td>
+                          <td>
+                            <div className="hours-cell">
+                              <span className="hours-value">{record.hoursPaid || 0}</span>
+                              <span className="hours-label">hrs</span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="action-buttons-compact">
+                              <button 
+                                className="icon-btn-compact delete-btn"
+                                onClick={() => {
+                                  if (confirm(`Delete day off record for ${record.employeeName}?`)) {
+                                    handleDeleteDayOff(record.id)
+                                  }
+                                }}
+                                title="Delete Day Off"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -3876,134 +4798,377 @@ function Dashboard({ activeView, setActiveView }) {
                 notes: ''
               })
             }}>
-              <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-                <h2>Add Day Off</h2>
-                <div className="form-group">
-                  <label>Employee</label>
-                  <select
-                    value={dayOffForm.employeeId}
-                    onChange={(e) => {
-                      const employee = employees.find(emp => emp.id === Number(e.target.value))
-                      const employeeId = Number(e.target.value)
-                      
-                      // Auto-calculate absences if date is selected
-                      if (employeeId && dayOffForm.date) {
-                        const date = new Date(dayOffForm.date)
-                        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
-                        const day = date.getDate()
-                        const month = monthNames[date.getMonth()]
-                        const year = date.getFullYear()
-                        const payPeriod = day <= 15 ? '1-15' : '16-31'
-                        
-                        const absences = countAbsencesForPeriod(employeeId, month, year, payPeriod)
-                        
-                        setDayOffForm({
-                          ...dayOffForm,
-                          employeeId: e.target.value,
-                          employeeName: employee ? employee.name : '',
-                          absenceCount: absences
-                        })
-                      } else {
-                        setDayOffForm({
-                          ...dayOffForm,
-                          employeeId: e.target.value,
-                          employeeName: employee ? employee.name : ''
-                        })
-                      }
+              <div className="dayoff-modal-content" onClick={(e) => e.stopPropagation()}>
+                {/* Modal Header */}
+                <div className="dayoff-modal-header">
+                  <div className="dayoff-modal-icon">
+                    <Calendar size={28} />
+                  </div>
+                  <div className="dayoff-modal-title-section">
+                    <h2>Add Day Off</h2>
+                    <p>Create a new day off record for an employee</p>
+                  </div>
+                  <button 
+                    className="dayoff-modal-close"
+                    onClick={() => {
+                      setShowAddDayOffModal(false)
+                      setDayOffForm({
+                        employeeId: '',
+                        employeeName: '',
+                        date: new Date().toISOString().split('T')[0],
+                        month: '',
+                        year: new Date().getFullYear(),
+                        payPeriod: '',
+                        hoursPaid: 9,
+                        absenceCount: 0,
+                        isQualified: true,
+                        notes: ''
+                      })
                     }}
-                    className="form-input"
                   >
-                    <option value="">Select Employee</option>
-                    {employees.map(emp => (
-                      <option key={emp.id} value={emp.id}>{emp.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Day Off Date</label>
-                  <input
-                    type="date"
-                    value={dayOffForm.date}
-                    onChange={(e) => {
-                      const newDate = e.target.value
-                      
-                      // Auto-calculate absences if employee is selected
-                      if (dayOffForm.employeeId && newDate) {
-                        const date = new Date(newDate)
-                        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
-                        const day = date.getDate()
-                        const month = monthNames[date.getMonth()]
-                        const year = date.getFullYear()
-                        const payPeriod = day <= 15 ? '1-15' : '16-31'
-                        
-                        const absences = countAbsencesForPeriod(Number(dayOffForm.employeeId), month, year, payPeriod)
-                        
-                        setDayOffForm({ 
-                          ...dayOffForm, 
-                          date: newDate,
-                          absenceCount: absences
-                        })
-                      } else {
-                        setDayOffForm({ ...dayOffForm, date: newDate })
-                      }
-                    }}
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Number of Absences in Pay Period (Auto-calculated)</label>
-                  <input
-                    type="number"
-                    value={dayOffForm.absenceCount}
-                    readOnly
-                    className="form-input"
-                    style={{backgroundColor: '#f5f5f5', cursor: 'not-allowed'}}
-                  />
-                  <small style={{color: '#666', marginTop: '5px', display: 'block'}}>
-                    {dayOffForm.employeeId && dayOffForm.date ? (
-                      <>
-                        {dayOffForm.absenceCount >= maxAbsencesForDayOff ? 
-                          `⚠️ Employee has ${dayOffForm.absenceCount} absences (days with 0 hours). Day off will NOT be paid.` :
-                          `✓ Employee has ${dayOffForm.absenceCount} absences (days with 0 hours). Day off will be paid (9 hours).`
-                        }
-                      </>
-                    ) : (
-                      'Select an employee and date to auto-calculate absences from salary counter records'
-                    )}
-                  </small>
-                </div>
-                <div className="form-group">
-                  <label>Notes (Optional)</label>
-                  <textarea
-                    value={dayOffForm.notes}
-                    onChange={(e) => setDayOffForm({ ...dayOffForm, notes: e.target.value })}
-                    className="form-input"
-                    rows="3"
-                    placeholder="Add any notes about this day off..."
-                  />
-                </div>
-                <div className="modal-actions">
-                  <button className="cancel-button" onClick={() => {
-                    setShowAddDayOffModal(false)
-                    setDayOffForm({
-                      employeeId: '',
-                      employeeName: '',
-                      date: new Date().toISOString().split('T')[0],
-                      month: '',
-                      year: new Date().getFullYear(),
-                      payPeriod: '',
-                      hoursPaid: 9,
-                      absenceCount: 0,
-                      isQualified: true,
-                      notes: ''
-                    })
-                  }}>
-                    Cancel
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
                   </button>
-                  <button className="save-button" onClick={handleAddDayOff}>
+                </div>
+
+                {/* Modal Body */}
+                <div className="dayoff-modal-body">
+                  {/* Employee Selection Card */}
+                  <div className="dayoff-form-card">
+                    <div className="dayoff-form-card-header">
+                      <User size={18} />
+                      <span>Employee Information</span>
+                    </div>
+                    <div className="dayoff-form-group">
+                      <label className="dayoff-label">
+                        <span>Select Employee</span>
+                        <span className="required-indicator">*</span>
+                      </label>
+                      <div className="dayoff-input-wrapper">
+                        <select
+                          value={dayOffForm.employeeId}
+                          onChange={(e) => {
+                            const employee = employees.find(emp => emp.id === Number(e.target.value))
+                            const employeeId = Number(e.target.value)
+                            
+                            // Auto-calculate absences if date is selected
+                            if (employeeId && dayOffForm.date) {
+                              const date = new Date(dayOffForm.date)
+                              const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+                              const day = date.getDate()
+                              const month = monthNames[date.getMonth()]
+                              const year = date.getFullYear()
+                              const payPeriod = day <= 15 ? '1-15' : '16-31'
+                              
+                              const absences = countAbsencesForPeriod(employeeId, month, year, payPeriod)
+                              
+                              setDayOffForm({
+                                ...dayOffForm,
+                                employeeId: e.target.value,
+                                employeeName: employee ? employee.name : '',
+                                absenceCount: absences
+                              })
+                            } else {
+                              setDayOffForm({
+                                ...dayOffForm,
+                                employeeId: e.target.value,
+                                employeeName: employee ? employee.name : ''
+                              })
+                            }
+                          }}
+                          className="dayoff-select"
+                        >
+                          <option value="">Choose an employee...</option>
+                          {employees.map(emp => (
+                            <option key={emp.id} value={emp.id}>{emp.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Date Selection Card */}
+                  <div className="dayoff-form-card">
+                    <div className="dayoff-form-card-header">
+                      <Calendar size={18} />
+                      <span>Date Information</span>
+                    </div>
+                    <div className="dayoff-form-group">
+                      <label className="dayoff-label">
+                        <span>Day Off Date</span>
+                        <span className="required-indicator">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        className="calendar-picker-button"
+                        onClick={() => {
+                          // Set calendar to the selected date's month, or current month if no date selected
+                          if (dayOffForm.date) {
+                            const selectedDate = new Date(dayOffForm.date)
+                            setCalendarCurrentYear(selectedDate.getFullYear())
+                            setCalendarCurrentMonth(selectedDate.getMonth())
+                          } else {
+                            const now = new Date()
+                            setCalendarCurrentYear(now.getFullYear())
+                            setCalendarCurrentMonth(now.getMonth())
+                          }
+                          setShowCalendarPicker(true)
+                        }}
+                      >
+                        <Calendar size={18} />
+                        <span>
+                          {dayOffForm.date ? 
+                            new Date(dayOffForm.date).toLocaleDateString('en-US', { 
+                              month: 'short', 
+                              day: 'numeric', 
+                              year: 'numeric' 
+                            }) : 
+                            'Select a date'
+                          }
+                        </span>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                      </button>
+                      {dayOffForm.date && (
+                        <div className="dayoff-date-preview">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                          </svg>
+                          <span>{new Date(dayOffForm.date).toLocaleDateString('en-US', { 
+                            weekday: 'long', 
+                            year: 'numeric', 
+                            month: 'long', 
+                            day: 'numeric' 
+                          })}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Absence Status Card */}
+                  <div className="dayoff-form-card full-width">
+                    <div className="dayoff-form-card-header">
+                      <AlertCircle size={18} />
+                      <span>Qualification Status</span>
+                    </div>
+                    <div className="dayoff-form-group">
+                      <label className="dayoff-label">
+                        <span>Absence Count</span>
+                        <span className="auto-badge">Auto-calculated</span>
+                      </label>
+                      <div className="dayoff-absence-display">
+                        <div className="dayoff-absence-number">
+                          {dayOffForm.absenceCount}
+                        </div>
+                        <div className="dayoff-absence-label">
+                          absence{dayOffForm.absenceCount !== 1 ? 's' : ''} in pay period
+                        </div>
+                      </div>
+                      
+                      {dayOffForm.employeeId && dayOffForm.date ? (
+                        <div className={`dayoff-status-banner ${dayOffForm.absenceCount >= maxAbsencesForDayOff ? 'not-qualified' : 'qualified'}`}>
+                          <div className="status-icon">
+                            {dayOffForm.absenceCount >= maxAbsencesForDayOff ? (
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="8" x2="12" y2="12"></line>
+                                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                              </svg>
+                            ) : (
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                              </svg>
+                            )}
+                          </div>
+                          <div className="status-content">
+                            <div className="status-title">
+                              {dayOffForm.absenceCount >= maxAbsencesForDayOff ? 
+                                'Not Qualified for Paid Day Off' : 
+                                'Qualified for Paid Day Off'
+                              }
+                            </div>
+                            <div className="status-message">
+                              {dayOffForm.absenceCount >= maxAbsencesForDayOff ? 
+                                `Employee has ${dayOffForm.absenceCount} absences (days with 0 hours). Day off will NOT be paid.` :
+                                `Employee has ${dayOffForm.absenceCount} absences. Day off will be paid (9 hours).`
+                              }
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="dayoff-info-message">
+                          <AlertCircle size={16} />
+                          <span>Select an employee and date to view qualification status</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Modal Footer */}
+                <div className="dayoff-modal-footer">
+                  <button 
+                    className="dayoff-cancel-button" 
+                    onClick={() => {
+                      setShowAddDayOffModal(false)
+                      setDayOffForm({
+                        employeeId: '',
+                        employeeName: '',
+                        date: new Date().toISOString().split('T')[0],
+                        month: '',
+                        year: new Date().getFullYear(),
+                        payPeriod: '',
+                        hoursPaid: 9,
+                        absenceCount: 0,
+                        isQualified: true,
+                        notes: ''
+                      })
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                    <span>Cancel</span>
+                  </button>
+                  <button 
+                    className="dayoff-save-button" 
+                    onClick={handleAddDayOff}
+                    disabled={!dayOffForm.employeeId || !dayOffForm.date}
+                  >
                     <Save size={18} />
                     <span>Add Day Off</span>
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Calendar Picker Modal */}
+          {showCalendarPicker && (
+            <div className="modal-overlay" onClick={() => {
+              setShowCalendarPicker(false)
+              // Reset calendar to current month when closing
+              const now = new Date()
+              setCalendarCurrentYear(now.getFullYear())
+              setCalendarCurrentMonth(now.getMonth())
+            }}>
+              <div className="calendar-picker-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="calendar-picker-header">
+                  <h3>Select Date</h3>
+                  <button className="calendar-close-btn" onClick={() => {
+                    setShowCalendarPicker(false)
+                    // Reset calendar to current month when closing
+                    const now = new Date()
+                    setCalendarCurrentYear(now.getFullYear())
+                    setCalendarCurrentMonth(now.getMonth())
+                  }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+                <div className="calendar-picker-body">
+                  <div className="calendar-nav">
+                    <button className="calendar-nav-btn" onClick={() => {
+                      if (calendarCurrentMonth === 0) {
+                        setCalendarCurrentMonth(11)
+                        setCalendarCurrentYear(calendarCurrentYear - 1)
+                      } else {
+                        setCalendarCurrentMonth(calendarCurrentMonth - 1)
+                      }
+                    }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                      </svg>
+                    </button>
+                    <div className="calendar-month-year">
+                      {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][calendarCurrentMonth]} {calendarCurrentYear}
+                    </div>
+                    <button className="calendar-nav-btn" onClick={() => {
+                      if (calendarCurrentMonth === 11) {
+                        setCalendarCurrentMonth(0)
+                        setCalendarCurrentYear(calendarCurrentYear + 1)
+                      } else {
+                        setCalendarCurrentMonth(calendarCurrentMonth + 1)
+                      }
+                    }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="calendar-weekdays">
+                    <div className="calendar-weekday">Sun</div>
+                    <div className="calendar-weekday">Mon</div>
+                    <div className="calendar-weekday">Tue</div>
+                    <div className="calendar-weekday">Wed</div>
+                    <div className="calendar-weekday">Thu</div>
+                    <div className="calendar-weekday">Fri</div>
+                    <div className="calendar-weekday">Sat</div>
+                  </div>
+                  <div className="calendar-days">
+                    {(() => {
+                      const today = new Date()
+                      const daysInMonth = new Date(calendarCurrentYear, calendarCurrentMonth + 1, 0).getDate()
+                      const firstDayOfMonth = new Date(calendarCurrentYear, calendarCurrentMonth, 1).getDay()
+                      
+                      const handleDateSelect = (day) => {
+                        const selectedDate = new Date(calendarCurrentYear, calendarCurrentMonth, day)
+                        const dateString = selectedDate.toISOString().split('T')[0]
+                        
+                        // Auto-calculate absences if employee is selected
+                        if (dayOffForm.employeeId) {
+                          const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+                          const month = monthNames[selectedDate.getMonth()]
+                          const year = selectedDate.getFullYear()
+                          const payPeriod = day <= 15 ? '1-15' : '16-31'
+                          
+                          const absences = countAbsencesForPeriod(Number(dayOffForm.employeeId), month, year, payPeriod)
+                          
+                          setDayOffForm({ 
+                            ...dayOffForm, 
+                            date: dateString,
+                            absenceCount: absences
+                          })
+                        } else {
+                          setDayOffForm({ ...dayOffForm, date: dateString })
+                        }
+                        setShowCalendarPicker(false)
+                        // Reset calendar to current month after selection
+                        const now = new Date()
+                        setCalendarCurrentYear(now.getFullYear())
+                        setCalendarCurrentMonth(now.getMonth())
+                      }
+                      
+                      const days = []
+                      for (let i = 0; i < firstDayOfMonth; i++) {
+                        days.push(<div key={`empty-${i}`} className="calendar-day empty"></div>)
+                      }
+                      
+                      for (let day = 1; day <= daysInMonth; day++) {
+                        const isToday = day === today.getDate() && calendarCurrentMonth === today.getMonth() && calendarCurrentYear === today.getFullYear()
+                        const isSelected = dayOffForm.date && new Date(dayOffForm.date).getDate() === day && new Date(dayOffForm.date).getMonth() === calendarCurrentMonth && new Date(dayOffForm.date).getFullYear() === calendarCurrentYear
+                        
+                        days.push(
+                          <button
+                            key={day}
+                            className={`calendar-day ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}`}
+                            onClick={() => handleDateSelect(day)}
+                          >
+                            {day}
+                          </button>
+                        )
+                      }
+                      
+                      return days
+                    })()}
+                  </div>
                 </div>
               </div>
             </div>
@@ -4170,9 +5335,14 @@ function Dashboard({ activeView, setActiveView }) {
         <SuccessPopup />
       <div className="dashboard">
         <div className="dashboard-header">
-          <div>
-            <h1>System Settings</h1>
-            <p className="subtitle">Configure system values and manage employees</p>
+          <div className="header-content">
+            <div className="header-icon-wrapper">
+              <FileText size={22} />
+            </div>
+            <div>
+              <h1>System Settings</h1>
+              <p className="subtitle">Configure system values and manage employees</p>
+            </div>
           </div>
         </div>
 
@@ -4556,9 +5726,14 @@ function Dashboard({ activeView, setActiveView }) {
       <SuccessPopup />
     <div className="dashboard">
       <div className="dashboard-header">
-        <div>
-          <h1>Employee Salary Dashboard</h1>
-          <p className="subtitle">Manage employee rates and calculate earnings (9-hour shifts)</p>
+        <div className="header-content">
+          <div className="header-icon-wrapper">
+            <DollarSign size={22} />
+          </div>
+          <div>
+            <h1>Employee Salary Dashboard</h1>
+            <p className="subtitle">Manage employee rates and calculate earnings (9-hour shifts)</p>
+          </div>
         </div>
         {isManager && (
           <button className="add-employee-button" onClick={() => setShowAddModal(true)}>
@@ -4568,175 +5743,353 @@ function Dashboard({ activeView, setActiveView }) {
         )}
       </div>
 
-      <div className="stats-grid">
-        <div className="stat-card primary">
-          <div className="stat-icon">
-            <User size={24} />
+      <div className="payroll-summary-grid">
+        <div className="payroll-summary-card primary-card">
+          <div className="summary-card-header">
+            <div className="summary-card-icon">
+              <User size={18} />
+            </div>
+            <span className="summary-card-label">Total Employees</span>
           </div>
-          <div className="stat-content">
-            <span className="stat-label">Total Employees</span>
-            <span className="stat-value">{stats.employeeCount}</span>
-          </div>
+          <div className="summary-card-value">{stats.employeeCount}</div>
+          <div className="summary-card-footer">Active employees in system</div>
         </div>
 
-        <div className="stat-card">
-          <div className="stat-icon">
-            <DollarSign size={24} />
+        <div className="payroll-summary-card">
+          <div className="summary-card-header">
+            <div className="summary-card-icon">
+              <DollarSign size={18} />
+            </div>
+            <span className="summary-card-label">Avg. Per Shift</span>
           </div>
-          <div className="stat-content">
-            <span className="stat-label">Avg. Per Shift (9hrs)</span>
-            <span className="stat-value">{isManager ? formatPeso(stats.avgPerShift) : censorRate()}</span>
-          </div>
+          <div className="summary-card-value">{isManager ? formatPeso(stats.avgPerShift) : censorRate()}</div>
+          <div className="summary-card-footer">Average 9-hour shift rate</div>
         </div>
 
-        <div className="stat-card">
-          <div className="stat-icon">
-            <Calendar size={24} />
+        <div className="payroll-summary-card">
+          <div className="summary-card-header">
+            <div className="summary-card-icon">
+              <Calendar size={18} />
+            </div>
+            <span className="summary-card-label">Total Monthly</span>
           </div>
-          <div className="stat-content">
-            <span className="stat-label">Total Monthly</span>
-            <span className="stat-value">{isManager ? formatPeso(stats.totalMonthly) : censorRate()}</span>
-          </div>
+          <div className="summary-card-value">{isManager ? formatPeso(stats.totalMonthly) : censorRate()}</div>
+          <div className="summary-card-footer">Estimated monthly payroll</div>
         </div>
 
-        <div className="stat-card">
-          <div className="stat-icon">
-            <TrendingUp size={24} />
+        <div className="payroll-summary-card highlight-card">
+          <div className="summary-card-header">
+            <div className="summary-card-icon">
+              <TrendingUp size={18} />
+            </div>
+            <span className="summary-card-label">Total Annual</span>
           </div>
-          <div className="stat-content">
-            <span className="stat-label">Total Annual</span>
-            <span className="stat-value">{isManager ? formatPeso(stats.totalAnnual) : censorRate()}</span>
-          </div>
+          <div className="summary-card-value">{isManager ? formatPeso(stats.totalAnnual) : censorRate()}</div>
+          <div className="summary-card-footer">Projected annual payroll</div>
         </div>
       </div>
 
-      <div className="employees-section">
+      <div className="payroll-records-section">
         <h2>Employee List</h2>
-        <div className="employees-grid">
-          {employees.map(employee => {
-            const empStats = calculateStats(employee)
-            return (
-              <div key={employee.id} className="employee-card">
-                <div className="employee-header">
-                  <div className="employee-avatar">
-                    <User size={24} />
-                  </div>
-                  <div className="employee-info">
-                    <h3>{employee.name}</h3>
-                    <span className="employee-hours">{employee.hoursPerShift} hours/shift</span>
-                  </div>
-                  {isManager && (
-                    <div className="employee-actions">
-                      <button 
-                        className="icon-btn edit-btn"
-                        onClick={() => handleEditEmployee(employee)}
-                        title="Edit"
-                      >
-                        <Edit2 size={16} />
-                      </button>
-                      <button 
-                        className="icon-btn delete-btn"
-                        onClick={() => handleDeleteEmployee(employee.id)}
-                        title="Delete"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="employee-rate">
-                  <span className="rate-label">Per 9-Hour Shift</span>
-                  <span className="rate-value">{isManager ? formatPeso(employee.ratePer9Hours) : censorRate()}</span>
-                </div>
-
-                <div className="employee-stats">
-                  <div className="stat-item">
-                    <Clock size={14} />
-                    <div>
-                      <span className="stat-item-label">Shift Time</span>
-                      <span className="stat-item-value">{employee.shiftType === 'first' ? '7AM-5PM' : '8:30PM-7AM'}</span>
-                    </div>
-                  </div>
-                  <div className="stat-item">
-                    <Calendar size={14} />
-                    <div>
-                      <span className="stat-item-label">Shift Type</span>
-                      <span className="stat-item-value">{employee.shiftType === 'first' ? 'First Shift' : 'Second Shift'}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+        <div className="payroll-table-container">
+          <table className="payroll-table compact-table">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Email</th>
+                <th>Phone Number</th>
+                <th>Shift</th>
+                <th>Rate/Shift</th>
+                {isManager && <th>Actions</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {employees.map(employee => {
+                const empStats = calculateStats(employee)
+                return (
+                  <tr key={employee.id}>
+                    <td className="employee-name-cell">
+                      <div className="employee-cell-content">
+                        <div className="employee-avatar-tiny">
+                          <User size={14} />
+                        </div>
+                        <div className="employee-cell-info">
+                          <span className="employee-name">{employee.name}</span>
+                          <span className="employee-meta">{employee.hoursPerShift}hrs/shift</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="contact-cell">
+                        <span className="contact-info">{employee.email || 'No email'}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="contact-cell">
+                        <span className="contact-info">{employee.phone || 'No phone'}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`period-badge ${employee.shiftType}`}>
+                        {employee.shiftType === 'first' ? 'First' : employee.shiftType === 'second' ? 'Second' : 'Open'}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="pay-cell">
+                        <span className="pay-value">{isManager ? formatPeso(employee.ratePer9Hours) : censorRate()}</span>
+                      </div>
+                    </td>
+                    {isManager && (
+                      <td>
+                        <div className="action-buttons-compact">
+                          <button 
+                            className="icon-btn-compact edit"
+                            onClick={() => handleEditEmployee(employee)}
+                            title="Edit"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button 
+                            className="icon-btn-compact delete"
+                            onClick={() => handleDeleteEmployee(employee.id)}
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 
       {showAddModal && (
-        <div className="modal-overlay" onClick={() => {
-          setShowAddModal(false)
-          setEditingEmployee(null)
-          setFormData({ name: '', ratePer9Hours: 0, hoursPerShift: 9, shiftType: 'first' })
-        }}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2>{editingEmployee ? 'Edit Employee' : 'Add New Employee'}</h2>
-            <div className="form-group">
-              <label>Employee Name</label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="Enter employee name"
-                className="form-input"
-              />
-            </div>
-            <div className="form-group">
-              <label>Rate Per 9-Hour Shift (₱)</label>
-              <input
-                type="number"
-                value={formData.ratePer9Hours}
-                onChange={(e) => setFormData({ ...formData, ratePer9Hours: e.target.value })}
-                placeholder="e.g., 600 for ₱600 per 9 hours"
-                className="form-input"
-              />
-            </div>
-            <div className="form-group">
-              <label>Hours Per Shift</label>
-              <input
-                type="number"
-                value={formData.hoursPerShift}
-                onChange={(e) => setFormData({ ...formData, hoursPerShift: e.target.value })}
-                placeholder="Enter hours per shift"
-                className="form-input"
-              />
-            </div>
-            <div className="form-group">
-              <label>Shift Type</label>
-              <select
-                value={formData.shiftType}
-                onChange={(e) => setFormData({ ...formData, shiftType: e.target.value })}
-                className="form-input"
-              >
-                <option value="first">First Shift (7AM-5PM)</option>
-                <option value="second">Second Shift (8:30PM-7AM)</option>
-              </select>
-            </div>
-            <div className="modal-actions">
+        <div 
+          className="modal-overlay" 
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) {
+              e.preventDefault()
+            }
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowAddModal(false)
+              setEditingEmployee(null)
+              setFormData({ name: '', email: '', phone: '', photo: '', ratePer9Hours: 0, hoursPerShift: 9, shiftType: 'first' })
+            }
+          }}
+        >
+          <div className="modal-content employee-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-custom">
+              <h2>{editingEmployee ? 'Edit Employee' : 'Add New Employee'}</h2>
               <button 
-                className="modal-button cancel"
+                className="modal-close-btn"
                 onClick={() => {
                   setShowAddModal(false)
                   setEditingEmployee(null)
-                  setFormData({ name: '', ratePer9Hours: 0, hoursPerShift: 9, shiftType: 'first' })
+                  setFormData({ name: '', email: '', phone: '', photo: '', ratePer9Hours: 0, hoursPerShift: 9, shiftType: 'first' })
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="employee-form-layout">
+              {/* Photo Section */}
+              <div className="photo-upload-section">
+                <div className="photo-placeholder">
+                  {formData.photo ? (
+                    <img src={formData.photo} alt="Employee" className="employee-photo-preview" />
+                  ) : (
+                    <div className="photo-placeholder-content">
+                      <User size={48} />
+                      <span>Employee Photo</span>
+                    </div>
+                  )}
+                </div>
+                <label className="photo-upload-btn">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files[0]
+                      if (file) {
+                        const reader = new FileReader()
+                        reader.onloadend = () => {
+                          setFormData({ ...formData, photo: reader.result })
+                        }
+                        reader.readAsDataURL(file)
+                      }
+                    }}
+                    style={{ display: 'none' }}
+                  />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                    <circle cx="12" cy="13" r="4"></circle>
+                  </svg>
+                  Upload Photo
+                </label>
+                <div className="photo-upload-note">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                  </svg>
+                  <span>Use a good quality photo with small file size for best results</span>
+                </div>
+                {formData.photo && (
+                  <button 
+                    className="photo-remove-btn"
+                    onClick={() => setFormData({ ...formData, photo: '' })}
+                  >
+                    Remove Photo
+                  </button>
+                )}
+              </div>
+
+              {/* Form Fields */}
+              <div className="employee-form-fields">
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Employee Name *</label>
+                    <div className="enhanced-field-wrapper">
+                      <div className="enhanced-field-icon">
+                        <User size={18} />
+                      </div>
+                      <input
+                        type="text"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        placeholder="Enter full name"
+                        className="enhanced-field-input"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-row two-columns">
+                  <div className="form-group">
+                    <label>Email Address</label>
+                    <div className="enhanced-field-wrapper">
+                      <div className="enhanced-field-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                          <polyline points="22,6 12,13 2,6"></polyline>
+                        </svg>
+                      </div>
+                      <input
+                        type="email"
+                        value={formData.email}
+                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        placeholder="email@example.com"
+                        className="enhanced-field-input"
+                      />
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label>Phone Number</label>
+                    <div className="enhanced-field-wrapper">
+                      <div className="enhanced-field-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                        </svg>
+                      </div>
+                      <input
+                        type="tel"
+                        value={formData.phone}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        placeholder="+63 XXX XXX XXXX"
+                        className="enhanced-field-input"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-row two-columns">
+                  <div className="form-group">
+                    <label>Rate Per 9-Hour Shift (₱) *</label>
+                    <div className="enhanced-field-wrapper">
+                      <div className="enhanced-field-icon">
+                        <DollarSign size={18} />
+                      </div>
+                      <input
+                        type="number"
+                        value={formData.ratePer9Hours}
+                        onChange={(e) => setFormData({ ...formData, ratePer9Hours: e.target.value })}
+                        placeholder="e.g., 600"
+                        className="enhanced-field-input"
+                      />
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label>Hours Per Shift *</label>
+                    <div className="enhanced-field-wrapper">
+                      <div className="enhanced-field-icon">
+                        <Clock size={18} />
+                      </div>
+                      <input
+                        type="number"
+                        value={formData.hoursPerShift}
+                        onChange={(e) => setFormData({ ...formData, hoursPerShift: e.target.value })}
+                        placeholder="e.g., 9"
+                        className="enhanced-field-input"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Shift Type *</label>
+                    <div className="enhanced-field-wrapper">
+                      <div className="enhanced-field-icon">
+                        <Calendar size={18} />
+                      </div>
+                      <select
+                        value={formData.shiftType}
+                        onChange={(e) => setFormData({ ...formData, shiftType: e.target.value })}
+                        className="enhanced-field-select"
+                      >
+                        <option value="first">First Shift (7AM-5PM)</option>
+                        <option value="second">Second Shift (8:30PM-7AM)</option>
+                        <option value="open">Open Time (Flexible Schedule)</option>
+                      </select>
+                    </div>
+                    {formData.shiftType === 'open' && (
+                      <div className="shift-info-note">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="10"></circle>
+                          <line x1="12" y1="16" x2="12" y2="12"></line>
+                          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                        </svg>
+                        <span>Open Time employees can work flexible hours without late deductions</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-actions-custom">
+              <button 
+                className="modal-button-custom cancel"
+                onClick={() => {
+                  setShowAddModal(false)
+                  setEditingEmployee(null)
+                  setFormData({ name: '', email: '', phone: '', photo: '', ratePer9Hours: 0, hoursPerShift: 9, shiftType: 'first' })
                 }}
               >
                 Cancel
               </button>
               <button 
-                className="modal-button save"
+                className="modal-button-custom save"
                 onClick={editingEmployee ? handleUpdateEmployee : handleAddEmployee}
               >
-                {editingEmployee ? 'Update' : 'Add'} Employee
+                {editingEmployee ? 'Update Employee' : 'Add Employee'}
               </button>
             </div>
           </div>
