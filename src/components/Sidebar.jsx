@@ -6,7 +6,8 @@ import {
   CreditCard,
   Calendar,
   Settings,
-  ChevronLeft
+  User,
+  Shield
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import './Sidebar.css'
@@ -86,12 +87,6 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, subl
           </div>
           {isOpen && <span className="logo-text">IRONWOLF</span>}
         </div>
-        <button 
-          className="toggle-button"
-          onClick={() => setIsOpen(!isOpen)}
-        >
-          <ChevronLeft size={20} className={isOpen ? '' : 'rotated'} />
-        </button>
       </div>
 
       <nav className="sidebar-nav">
@@ -151,6 +146,30 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, subl
           </>
         )}
       </nav>
+
+      {/* User Info Section at Bottom */}
+      {user && (
+        <div 
+          className="sidebar-user-info"
+          title={!isOpen ? `${user.employeeName || user.email?.split('@')[0] || user.roleTitle || 'User'} - ${user.roleTitle || user.role}` : ''}
+        >
+          <div className="user-avatar">
+            <User size={isOpen ? 20 : 18} />
+          </div>
+          {isOpen && (
+            <div className="user-details">
+              <div className="user-name-label">Logged in as:</div>
+              <div className="user-name">
+                {user.employeeName || user.email?.split('@')[0] || user.roleTitle || 'User'}
+              </div>
+              <div className="user-role-badge">
+                <Shield size={12} />
+                <span>{user.roleTitle || user.role}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {showAccessModal && (
         <div className="access-modal-overlay" onClick={() => setShowAccessModal(false)}>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { 
   DollarSign, 
   TrendingUp, 
+  TrendingDown,
   Calendar,
   Clock,
   User,
@@ -17,8 +18,12 @@ import {
   AlertCircle,
   Wallet,
   Mail,
-  Phone
+  Phone,
+  Award,
+  Info,
+  Download
 } from 'lucide-react'
+import JsBarcode from 'jsbarcode'
 import { useAuth } from '../contexts/AuthContext'
 import './Dashboard.css'
 import './TimeTracker.css'
@@ -530,20 +535,220 @@ function Dashboard({ activeView, setActiveView }) {
             }
         await updateEmployee(editingEmployee, updates)
         
+        // Get the updated employee info
+        const updatedEmployee = { ...employees.find(emp => emp.id === editingEmployee), ...updates }
+        
+        // Update employees state
         setEmployees(employees.map(emp => 
           emp.id === editingEmployee 
-            ? { ...emp, ...updates }
+            ? updatedEmployee
           : emp
       ))
+
+        // Recalculate all existing payroll records for this employee
+        const employeeRecords = timeRecords.filter(record => record.employeeId === editingEmployee)
+        
+        if (employeeRecords.length > 0) {
+          const updatedRecords = employeeRecords.map(record => {
+            // Recalculate earnings using the new rate/shift
+            const recalculatedEarnings = recalculateRecordEarnings(record, updatedEmployee)
+            return {
+              ...record,
+              ...recalculatedEarnings
+            }
+          })
+
+          // Update all records in database
+          await Promise.all(
+            updatedRecords.map(record => updateTimeRecord(record.id, record))
+          )
+
+          // Update timeRecords state
+          setTimeRecords(timeRecords.map(record => {
+            const updatedRecord = updatedRecords.find(r => r.id === record.id)
+            return updatedRecord || record
+          }))
+
+          showSuccess(
+            'Employee Updated!', 
+            `Employee information and ${employeeRecords.length} payroll record(s) have been updated with new rate.`,
+            [
+              { label: 'New Rate', value: formatPeso(updates.ratePer9Hours) },
+              { label: 'Records Updated', value: `${employeeRecords.length}` }
+            ]
+          )
+        } else {
+          showSuccess('Employee Updated!', 'Employee information has been updated.', [])
+        }
+
         setFormData({ name: '', email: '', phone: '', photo: '', ratePer9Hours: 0, hoursPerShift: 9, shiftType: 'first' })
-      setShowAddModal(false)
-      setEditingEmployee(null)
-        showSuccess('Employee Updated!', 'Employee information has been updated.', [])
+        setShowAddModal(false)
+        setEditingEmployee(null)
       } catch (error) {
         console.error('Error updating employee:', error)
         showSuccess('Error', 'Failed to update employee. Please try again.', [])
       }
     }
+  }
+
+  // Helper function to recalculate a single payroll record's earnings
+  const recalculateRecordEarnings = (record, employee) => {
+    // Calculate hours from time entries
+    let totalRegularHours = 0
+    let totalOvertimeHours = 0
+    let lateMinutes = 0
+    
+    Object.entries(record.timeEntries).forEach(([day, dayEntry]) => {
+      // Calculate day hours (regular and overtime)
+      const dayHours = calculateDayHoursForRecord(dayEntry, employee)
+      totalRegularHours += dayHours.regularHours
+      totalOvertimeHours += dayHours.overtimeHours
+      
+      // Calculate late minutes
+      if (employee.shiftType === 'first' && dayEntry.firstShiftIn) {
+        const [hours, minutes] = dayEntry.firstShiftIn.split(':').map(Number)
+        const shiftInMinutes = hours * 60 + minutes
+        const expectedShiftStart = 7 * 60 // 7:00 AM
+        if (shiftInMinutes > expectedShiftStart) {
+          lateMinutes += shiftInMinutes - expectedShiftStart
+        }
+      } else if (employee.shiftType === 'second' && dayEntry.secondShiftIn) {
+        const [hours, minutes] = dayEntry.secondShiftIn.split(':').map(Number)
+        const shiftInMinutes = hours * 60 + minutes
+        const expectedShiftStart = 18 * 60 // 6:00 PM
+        if (shiftInMinutes > expectedShiftStart) {
+          lateMinutes += shiftInMinutes - expectedShiftStart
+        }
+      }
+    })
+    
+    // Add day off hours if any (from the original record)
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+    const dayOffHours = getEmployeeDayOffHoursForPeriod(employee.id, record.month, record.year, record.payPeriod)
+    totalRegularHours += dayOffHours
+    
+    const totalHours = totalRegularHours + totalOvertimeHours
+    const hourlyRate = employee.ratePer9Hours / employee.hoursPerShift
+    const regularPay = totalRegularHours * hourlyRate
+    const overtimePay = totalOvertimeHours * hourlyRate
+    const grossPay = regularPay + overtimePay
+    
+    // Commissions (keep original values)
+    const rushTarpCommission = (record.rushTarpCount || 0) * rushTarpCommissionRate
+    const regularCommission = (record.regularCommissionCount || 0) * regularCommissionRate
+    
+    // Calculate custom commissions
+    let customCommissionsTotal = 0
+    if (record.customCommissionCounts) {
+      Object.keys(record.customCommissionCounts).forEach(commId => {
+        const commission = customCommissions.find(c => c.id === commId)
+        if (commission) {
+          customCommissionsTotal += record.customCommissionCounts[commId] * commission.rate
+        }
+      })
+    }
+    
+    const totalCommissions = rushTarpCommission + regularCommission + customCommissionsTotal
+    
+    // Late deduction
+    const lateDeduction = lateMinutes * lateDeductionRate
+    
+    // Deductions
+    const cashAdvanceDeduction = Number(record.cashAdvance) || 0
+    const totalDeductions = cashAdvanceDeduction + lateDeduction
+    
+    // Net Pay
+    const netPay = grossPay + totalCommissions - totalDeductions
+    
+    return {
+      regularPay: regularPay.toFixed(2),
+      overtimePay: Math.abs(overtimePay).toFixed(2),
+      grossPay: grossPay.toFixed(2),
+      rushTarpCommission: rushTarpCommission.toFixed(2),
+      regularCommission: regularCommission.toFixed(2),
+      customCommissionsTotal: customCommissionsTotal.toFixed(2),
+      totalCommissions: totalCommissions.toFixed(2),
+      totalDeductions: totalDeductions.toFixed(2),
+      netPay: netPay.toFixed(2),
+      totalHours: Math.abs(totalHours).toFixed(2),
+      regularHours: Math.abs(totalRegularHours).toFixed(2),
+      totalOvertimeHours: Math.abs(totalOvertimeHours).toFixed(2),
+      lateMinutes: lateMinutes,
+      lateDeduction: lateDeduction.toFixed(2)
+    }
+  }
+
+  // Helper function to calculate hours for a day entry (similar to calculateDayHours but for records)
+  const calculateDayHoursForRecord = (dayEntry, employee) => {
+    let regularHours = 0
+    let overtimeHours = 0
+    
+    // First shift
+    if (dayEntry.firstShiftIn && dayEntry.firstShiftOut) {
+      const [inHours, inMinutes] = dayEntry.firstShiftIn.split(':').map(Number)
+      const [outHours, outMinutes] = dayEntry.firstShiftOut.split(':').map(Number)
+      
+      let totalMinutes = (outHours * 60 + outMinutes) - (inHours * 60 + inMinutes)
+      
+      // Handle overnight shift
+      if (totalMinutes < 0) {
+        totalMinutes += 24 * 60
+      }
+      
+      const hours = totalMinutes / 60
+      
+      if (hours > employee.hoursPerShift) {
+        regularHours += employee.hoursPerShift
+        overtimeHours += hours - employee.hoursPerShift
+      } else {
+        regularHours += hours
+      }
+    }
+    
+    // Second shift
+    if (dayEntry.secondShiftIn && dayEntry.secondShiftOut) {
+      const [inHours, inMinutes] = dayEntry.secondShiftIn.split(':').map(Number)
+      const [outHours, outMinutes] = dayEntry.secondShiftOut.split(':').map(Number)
+      
+      let totalMinutes = (outHours * 60 + outMinutes) - (inHours * 60 + inMinutes)
+      
+      // Handle overnight shift
+      if (totalMinutes < 0) {
+        totalMinutes += 24 * 60
+      }
+      
+      const hours = totalMinutes / 60
+      
+      if (regularHours + hours > employee.hoursPerShift) {
+        const remainingRegularHours = employee.hoursPerShift - regularHours
+        if (remainingRegularHours > 0) {
+          regularHours += remainingRegularHours
+          overtimeHours += hours - remainingRegularHours
+        } else {
+          overtimeHours += hours
+        }
+      } else {
+        regularHours += hours
+      }
+    }
+    
+    // Overtime shift
+    if (dayEntry.otTimeIn && dayEntry.otTimeOut) {
+      const [inHours, inMinutes] = dayEntry.otTimeIn.split(':').map(Number)
+      const [outHours, outMinutes] = dayEntry.otTimeOut.split(':').map(Number)
+      
+      let totalMinutes = (outHours * 60 + outMinutes) - (inHours * 60 + inMinutes)
+      
+      // Handle overnight shift
+      if (totalMinutes < 0) {
+        totalMinutes += 24 * 60
+      }
+      
+      const hours = totalMinutes / 60
+      overtimeHours += hours
+    }
+    
+    return { regularHours, overtimeHours }
   }
 
   const handleDeleteEmployee = async (id) => {
@@ -557,6 +762,96 @@ function Dashboard({ activeView, setActiveView }) {
         showSuccess('Error', 'Failed to delete employee. Please try again.', [])
       }
     }
+  }
+
+  // Generate and download barcode for employee
+  const handleDownloadBarcode = (employee) => {
+    const barcode = employee.barcode || (employee.id + 100000).toString()
+    
+    // Create main canvas for the final card
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    
+    // Set canvas dimensions
+    canvas.width = 500
+    canvas.height = 300
+    
+    // Draw white background
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    
+    // Draw border
+    ctx.strokeStyle = '#000000'
+    ctx.lineWidth = 3
+    ctx.strokeRect(15, 15, canvas.width - 30, canvas.height - 30)
+    
+    // Draw inner border
+    ctx.lineWidth = 1
+    ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40)
+    
+    // Draw employee name
+    ctx.fillStyle = '#000000'
+    ctx.font = 'bold 28px Arial'
+    ctx.textAlign = 'center'
+    ctx.fillText(employee.name.toUpperCase(), canvas.width / 2, 60)
+    
+    // Draw "TIME CLOCK BARCODE" label
+    ctx.font = '16px Arial'
+    ctx.fillStyle = '#666666'
+    ctx.fillText('TIME CLOCK BARCODE', canvas.width / 2, 85)
+    
+    // Create a temporary canvas for the barcode
+    const barcodeCanvas = document.createElement('canvas')
+    
+    try {
+      // Generate barcode using JsBarcode (CODE128 format - widely supported)
+      JsBarcode(barcodeCanvas, barcode, {
+        format: 'CODE128',
+        width: 3,
+        height: 100,
+        displayValue: true,
+        fontSize: 20,
+        margin: 10,
+        background: '#ffffff',
+        lineColor: '#000000'
+      })
+      
+      // Draw the barcode onto main canvas
+      const barcodeX = (canvas.width - barcodeCanvas.width) / 2
+      const barcodeY = 105
+      ctx.drawImage(barcodeCanvas, barcodeX, barcodeY)
+      
+    } catch (error) {
+      console.error('Error generating barcode:', error)
+      // Fallback: Draw text if barcode generation fails
+      ctx.font = 'bold 48px Courier New'
+      ctx.fillStyle = '#000000'
+      ctx.fillText(barcode, canvas.width / 2, 180)
+    }
+    
+    // Draw footer instructions
+    ctx.font = '14px Arial'
+    ctx.fillStyle = '#666666'
+    ctx.fillText('Scan this card at the time clock to clock in/out', canvas.width / 2, 250)
+    
+    // Draw barcode number at bottom
+    ctx.font = 'bold 12px Courier New'
+    ctx.fillStyle = '#000000'
+    ctx.fillText(`ID: ${barcode}`, canvas.width / 2, 275)
+    
+    // Convert to blob and download
+    canvas.toBlob((blob) => {
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${employee.name.replace(/\s+/g, '_')}_TimeClockBarcode.png`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    })
+    
+    showSuccess('Barcode Downloaded', `Time clock barcode for ${employee.name} has been downloaded`, [])
   }
 
   // Custom Commission Handlers
@@ -1673,8 +1968,8 @@ function Dashboard({ activeView, setActiveView }) {
         <title>Payroll Records</title>
         <style>
           @page {
-            size: landscape;
-            margin: 0.3in 0.4in;
+            size: portrait;
+            margin: 0.4in 0.3in;
           }
           @media print {
             body { 
@@ -1694,24 +1989,24 @@ function Dashboard({ activeView, setActiveView }) {
           }
           
           .document-container {
-            padding: 15px 20px;
+            padding: 10px 15px;
             background: white;
           }
           
           /* Header Section */
           .document-header {
             border-bottom: 3px solid #000;
-            padding-bottom: 10px;
-            margin-bottom: 12px;
+            padding-bottom: 8px;
+            margin-bottom: 10px;
           }
           
           .company-info {
             text-align: center;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
           }
           
           .company-name {
-            font-size: 24px;
+            font-size: 22px;
             font-weight: 900;
             margin: 0 0 3px 0;
             color: #000;
@@ -1720,7 +2015,7 @@ function Dashboard({ activeView, setActiveView }) {
           }
           
           .company-tagline {
-            font-size: 9px;
+            font-size: 10px;
             color: #666;
             margin: 0;
             font-style: italic;
@@ -1729,9 +2024,9 @@ function Dashboard({ activeView, setActiveView }) {
           .document-title {
             background: linear-gradient(135deg, #1a1a1a 0%, #000 100%);
             color: #fff;
-            padding: 8px 15px;
+            padding: 8px 12px;
             text-align: center;
-            margin: 8px 0 6px 0;
+            margin: 8px 0;
             border-radius: 3px;
           }
           
@@ -1761,7 +2056,7 @@ function Dashboard({ activeView, setActiveView }) {
             font-weight: 600;
             color: #000;
             text-transform: uppercase;
-            font-size: 8px;
+            font-size: 9px;
             letter-spacing: 0.3px;
           }
           
@@ -1784,12 +2079,12 @@ function Dashboard({ activeView, setActiveView }) {
           }
           
           .payroll-table th {
-            padding: 6px 5px;
+            padding: 10px 8px;
             text-align: left;
-            font-size: 8px;
+            font-size: 11px;
             font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.5px;
             border: 1px solid #333;
           }
           
@@ -1810,10 +2105,11 @@ function Dashboard({ activeView, setActiveView }) {
           }
           
           .payroll-table td {
-            padding: 5px;
-            font-size: 8px;
+            padding: 10px 8px;
+            font-size: 11px;
             border: 1px solid #ddd;
             color: #000;
+            line-height: 1.4;
           }
           
           .payroll-table td.numeric {
@@ -1825,12 +2121,7 @@ function Dashboard({ activeView, setActiveView }) {
           .employee-name {
             font-weight: 700;
             color: #000;
-            font-size: 9px;
-          }
-          
-          .period-cell {
-            font-weight: 600;
-            color: #333;
+            font-size: 12px;
           }
           
           /* Total Row */
@@ -1842,8 +2133,8 @@ function Dashboard({ activeView, setActiveView }) {
           
           .total-row td {
             font-weight: 700;
-            font-size: 9px;
-            padding: 8px 5px;
+            font-size: 12px;
+            padding: 12px 8px;
             color: #000;
             border-color: #999;
           }
@@ -1851,12 +2142,12 @@ function Dashboard({ activeView, setActiveView }) {
           .total-label {
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 900;
           }
           
           .total-row td.numeric {
-            font-size: 9px;
+            font-size: 11px;
             font-weight: 900;
           }
           
@@ -1874,23 +2165,23 @@ function Dashboard({ activeView, setActiveView }) {
           
           .summary-item {
             text-align: center;
-            padding: 8px;
+            padding: 10px;
             background: white;
             border: 1px solid #ddd;
             border-radius: 3px;
           }
           
           .summary-label {
-            font-size: 7px;
+            font-size: 9px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             color: #666;
             font-weight: 600;
-            margin-bottom: 4px;
+            margin-bottom: 5px;
           }
           
           .summary-value {
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 900;
             color: #000;
             font-family: 'Courier New', monospace;
@@ -1898,16 +2189,16 @@ function Dashboard({ activeView, setActiveView }) {
           
           /* Footer Section */
           .document-footer {
-            margin-top: 15px;
-            padding-top: 10px;
+            margin-top: 12px;
+            padding-top: 8px;
             border-top: 1px solid #ddd;
           }
           
           .signatures {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-            margin-top: 20px;
+            gap: 12px;
+            margin-top: 15px;
           }
           
           .signature-line {
@@ -1921,24 +2212,24 @@ function Dashboard({ activeView, setActiveView }) {
           }
           
           .signature-label {
-            font-size: 8px;
+            font-size: 10px;
             font-weight: 700;
             text-transform: uppercase;
             color: #000;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.5px;
           }
           
           .signature-role {
-            font-size: 7px;
+            font-size: 9px;
             color: #666;
             font-style: italic;
-            margin-top: 2px;
+            margin-top: 3px;
           }
           
           .print-date {
             text-align: center;
             margin-top: 10px;
-            font-size: 7px;
+            font-size: 8px;
             color: #999;
           }
         </style>
@@ -1960,7 +2251,6 @@ function Dashboard({ activeView, setActiveView }) {
               <div class="report-info-item">
                 <span class="report-info-label">Report Date</span>
                 <span class="report-info-value">${new Date().toLocaleDateString('en-US', { 
-                  weekday: 'long', 
                   year: 'numeric', 
                   month: 'long', 
                   day: 'numeric' 
@@ -1982,8 +2272,6 @@ function Dashboard({ activeView, setActiveView }) {
             <thead>
               <tr>
                 <th>Employee Name</th>
-                <th>Period</th>
-                <th>Month/Year</th>
                 <th class="numeric">Hours</th>
                 <th class="numeric">Regular Pay</th>
                 <th class="numeric">Overtime</th>
@@ -1997,8 +2285,6 @@ function Dashboard({ activeView, setActiveView }) {
               ${timeRecords.map(record => `
                 <tr>
                   <td class="employee-name">${record.employeeName}</td>
-                  <td class="period-cell">${record.payPeriod}</td>
-                  <td>${record.month} ${record.year}</td>
                   <td class="numeric">${record.totalHours}</td>
                   <td class="numeric">₱${Number(record.regularPay).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   <td class="numeric">₱${Number(record.overtimePay).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -2009,7 +2295,7 @@ function Dashboard({ activeView, setActiveView }) {
                 </tr>
               `).join('')}
               <tr class="total-row">
-                <td colspan="3" class="total-label">GRAND TOTALS</td>
+                <td class="total-label">GRAND TOTALS</td>
                 <td class="numeric">${timeRecords.reduce((sum, r) => sum + Number(r.totalHours), 0).toFixed(1)}</td>
                 <td class="numeric">₱${timeRecords.reduce((sum, r) => sum + Number(r.regularPay), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 <td class="numeric">₱${timeRecords.reduce((sum, r) => sum + Number(r.overtimePay), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -3745,118 +4031,319 @@ function Dashboard({ activeView, setActiveView }) {
           </div>
         )}
 
-        {/* Payroll Detail View Modal */}
+        {/* Payroll Detail View Modal - Remastered */}
         {viewingPayrollRecord && (
           <div className="modal-overlay" onClick={() => setViewingPayrollRecord(null)}>
-            <div className="modal-content payroll-detail-modal" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                <h2>Payroll Details</h2>
-                <button className="close-btn" onClick={() => setViewingPayrollRecord(null)}>
+            <div className="modal-content payroll-detail-modal-v2" onClick={(e) => e.stopPropagation()}>
+              {/* Header */}
+              <div className="payroll-modal-header-v2">
+                <div className="payroll-modal-icon-v2">
+                  <FileText size={24} />
+                </div>
+                <div className="payroll-modal-title-section-v2">
+                  <h2>Payroll Statement</h2>
+                  <p>{viewingPayrollRecord.month} {viewingPayrollRecord.year} • Days {viewingPayrollRecord.payPeriod}</p>
+                </div>
+                {viewingPayrollRecord.processed && (
+                  <div className="processed-badge-v2">
+                    <CheckCircle size={18} />
+                    <span>Processed</span>
+                  </div>
+                )}
+                <button className="payroll-modal-close-v2" onClick={() => setViewingPayrollRecord(null)}>
                   <X size={20} />
                 </button>
               </div>
 
-              <div className="payroll-detail-content">
-                <div className="employee-detail-header">
-                  <div className="employee-avatar-large">
-                    <User size={32} />
-                  </div>
-                  <div>
-                    <h3>{viewingPayrollRecord.employeeName}</h3>
-                    <p className="period-info">{viewingPayrollRecord.month} {viewingPayrollRecord.year} - Days {viewingPayrollRecord.payPeriod}</p>
-                  </div>
-                  {viewingPayrollRecord.processed && (
-                    <div className="processed-badge-large">
-                      <CheckCircle size={20} />
-                      <span>Processed</span>
+              {/* Body */}
+              <div className="payroll-modal-body-v2">
+                {/* Left Column */}
+                <div className="payroll-left-column-v2">
+                  {/* Employee Info Card */}
+                  <div className="payroll-employee-card-v2">
+                    <div className="payroll-employee-avatar-v2">
+                      <User size={28} />
                     </div>
-                  )}
-                </div>
-
-                <div className="detail-sections">
-                  <div className="detail-section">
-                    <h4>Work Hours</h4>
-                    <div className="detail-grid">
-                      <div className="detail-item">
-                        <span className="detail-label">Regular Hours</span>
-                        <span className="detail-value">{viewingPayrollRecord.regularHours} hrs</span>
-                      </div>
-                      <div className="detail-item">
-                        <span className="detail-label">Overtime Hours</span>
-                        <span className="detail-value">{viewingPayrollRecord.totalOvertimeHours} hrs</span>
-                      </div>
-                      <div className="detail-item highlight">
-                        <span className="detail-label">Total Hours</span>
-                        <span className="detail-value">{viewingPayrollRecord.totalHours} hrs</span>
-                      </div>
+                    <div className="payroll-employee-info-v2">
+                      <h3>{viewingPayrollRecord.employeeName}</h3>
+                      <p>Employee #{viewingPayrollRecord.employeeId}</p>
                     </div>
                   </div>
 
-                  <div className="detail-section">
-                    <h4>Earnings</h4>
-                    <div className="detail-grid">
-                      <div className="detail-item">
-                        <span className="detail-label">Regular Pay</span>
-                        <span className="detail-value">{formatPeso(viewingPayrollRecord.regularPay)}</span>
+                  {/* Net Pay Summary - Expanded */}
+                  <div className="payroll-summary-card-v2">
+                    <div className="payroll-summary-breakdown-v2">
+                      {/* Earnings Section */}
+                      <div className="payroll-breakdown-section-v2 expand">
+                        <div className="breakdown-section-title-v2">Earnings</div>
+                        <div className="summary-item-v2">
+                          <span>Regular Pay</span>
+                          <span>{formatPeso(viewingPayrollRecord.regularPay)}</span>
+                        </div>
+                        {viewingPayrollRecord.overtimePay > 0 && (
+                          <div className="summary-item-v2">
+                            <span>Overtime Pay</span>
+                            <span>{formatPeso(viewingPayrollRecord.overtimePay)}</span>
+                          </div>
+                        )}
+                        <div className="summary-item-v2">
+                          <span>Gross Pay</span>
+                          <span>{formatPeso(viewingPayrollRecord.grossPay)}</span>
+                        </div>
                       </div>
-                      <div className="detail-item">
-                        <span className="detail-label">Overtime Pay</span>
-                        <span className="detail-value">{formatPeso(viewingPayrollRecord.overtimePay)}</span>
-                      </div>
-                      <div className="detail-item highlight">
-                        <span className="detail-label">Gross Pay</span>
-                        <span className="detail-value">{formatPeso(viewingPayrollRecord.grossPay)}</span>
-                      </div>
-                      <div className="detail-item positive">
-                        <span className="detail-label">Commissions</span>
-                        <span className="detail-value">+{formatPeso(viewingPayrollRecord.totalCommissions)}</span>
-                      </div>
-                    </div>
-                  </div>
 
-                  <div className="detail-section">
-                    <h4>Deductions</h4>
-                    <div className="detail-grid">
-                      {viewingPayrollRecord.cashAdvance > 0 && (
-                        <div className="detail-item negative">
-                          <span className="detail-label">Cash Advance</span>
-                          <span className="detail-value">-{formatPeso(viewingPayrollRecord.cashAdvance)}</span>
+                      {/* Commissions Section */}
+                      {viewingPayrollRecord.totalCommissions > 0 && (
+                        <div className="payroll-breakdown-section-v2 expand">
+                          <div className="breakdown-section-title-v2">Commissions</div>
+                          {viewingPayrollRecord.rushTarpCount > 0 && (
+                            <div className="summary-item-v2 positive">
+                              <span>Rush Tarp ({viewingPayrollRecord.rushTarpCount})</span>
+                              <span>+{formatPeso(viewingPayrollRecord.rushTarpCommission)}</span>
+                            </div>
+                          )}
+                          {viewingPayrollRecord.regularCommissionCount > 0 && (
+                            <div className="summary-item-v2 positive">
+                              <span>Regular ({viewingPayrollRecord.regularCommissionCount})</span>
+                              <span>+{formatPeso(viewingPayrollRecord.regularCommission)}</span>
+                            </div>
+                          )}
+                          {viewingPayrollRecord.customCommissionsTotal > 0 && (
+                            <div className="summary-item-v2 positive">
+                              <span>Custom</span>
+                              <span>+{formatPeso(viewingPayrollRecord.customCommissionsTotal)}</span>
+                            </div>
+                          )}
+                          <div className="summary-item-v2 positive">
+                            <span>Total Commissions</span>
+                            <span>+{formatPeso(viewingPayrollRecord.totalCommissions)}</span>
+                          </div>
                         </div>
                       )}
-                      {viewingPayrollRecord.lateMinutes > 0 && (
-                        <div className="detail-item negative">
-                          <span className="detail-label">Late ({viewingPayrollRecord.lateMinutes} min)</span>
-                          <span className="detail-value">-{formatPeso(viewingPayrollRecord.lateDeduction)}</span>
+
+                      {/* Deductions Section */}
+                      {viewingPayrollRecord.totalDeductions > 0 && (
+                        <div className="payroll-breakdown-section-v2 expand">
+                          <div className="breakdown-section-title-v2">Deductions</div>
+                          {viewingPayrollRecord.cashAdvance > 0 && (
+                            <div className="summary-item-v2 negative">
+                              <span>Cash Advance</span>
+                              <span>-{formatPeso(viewingPayrollRecord.cashAdvance)}</span>
+                            </div>
+                          )}
+                          {viewingPayrollRecord.lateDeduction > 0 && (
+                            <div className="summary-item-v2 negative">
+                              <span>Late ({viewingPayrollRecord.lateMinutes} min)</span>
+                              <span>-{formatPeso(viewingPayrollRecord.lateDeduction)}</span>
+                            </div>
+                          )}
+                          <div className="summary-item-v2 negative">
+                            <span>Total Deductions</span>
+                            <span>-{formatPeso(viewingPayrollRecord.totalDeductions)}</span>
+                          </div>
                         </div>
                       )}
-                      <div className="detail-item highlight negative">
-                        <span className="detail-label">Total Deductions</span>
-                        <span className="detail-value">-{formatPeso(viewingPayrollRecord.totalDeductions)}</span>
+                    </div>
+
+                    {/* Net Pay at Bottom */}
+                    <div className="payroll-net-pay-v2">
+                      <span className="net-pay-label-v2">NET PAY</span>
+                      <span className="net-pay-amount-v2">{formatPeso(viewingPayrollRecord.netPay)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column - Main Grid */}
+                <div className="payroll-grid-v2">
+                  {/* First Row: Work Hours and Base Pay */}
+                  <div className="payroll-grid-row-v2">
+                    {/* Work Hours Section */}
+                    <div className="payroll-card-v2">
+                      <div className="payroll-card-header-v2">
+                        <Clock size={16} />
+                        <span>Work Hours</span>
+                      </div>
+                      <div className="payroll-card-content-v2">
+                        <div className="payroll-stat-row-v2">
+                          <span className="stat-label-v2">Regular Hours</span>
+                          <span className="stat-value-v2">{viewingPayrollRecord.regularHours} hrs</span>
+                        </div>
+                        <div className="payroll-stat-row-v2">
+                          <span className="stat-label-v2">Overtime Hours</span>
+                          <span className="stat-value-v2">{viewingPayrollRecord.totalOvertimeHours} hrs</span>
+                        </div>
+                        <div className="payroll-stat-row-v2 highlight">
+                          <span className="stat-label-v2">Total Hours</span>
+                          <span className="stat-value-v2 bold">{viewingPayrollRecord.totalHours} hrs</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Base Pay Section */}
+                    <div className="payroll-card-v2">
+                      <div className="payroll-card-header-v2">
+                        <DollarSign size={16} />
+                        <span>Base Pay</span>
+                      </div>
+                      <div className="payroll-card-content-v2">
+                        <div className="payroll-stat-row-v2">
+                          <span className="stat-label-v2">Regular Pay</span>
+                          <span className="stat-value-v2">{formatPeso(viewingPayrollRecord.regularPay)}</span>
+                        </div>
+                        <div className="payroll-stat-row-v2">
+                          <span className="stat-label-v2">Overtime Pay</span>
+                          <span className="stat-value-v2">{formatPeso(viewingPayrollRecord.overtimePay)}</span>
+                        </div>
+                        <div className="payroll-stat-row-v2 highlight">
+                          <span className="stat-label-v2">Gross Pay</span>
+                          <span className="stat-value-v2 bold">{formatPeso(viewingPayrollRecord.grossPay)}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="net-pay-section">
-                    <span className="net-pay-label">NET PAY</span>
-                    <span className="net-pay-amount">{formatPeso(viewingPayrollRecord.netPay)}</span>
-                  </div>
-                </div>
+                  {/* Commission Breakdown Section */}
+                  <div className="payroll-card-v2 expand-vertical">
+                    <div className="payroll-card-header-v2">
+                      <Award size={16} />
+                      <span>Commission Breakdown</span>
+                      {viewingPayrollRecord.totalCommissions > 0 && (
+                        <span className="commission-total-badge-v2">
+                          +{formatPeso(viewingPayrollRecord.totalCommissions)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="payroll-card-content-v2 space-between">
+                      {viewingPayrollRecord.totalCommissions === 0 ? (
+                        <div className="no-commissions-v2">
+                          <Info size={16} />
+                          <span>No commissions earned this period</span>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Rush Tarp Commission */}
+                          {viewingPayrollRecord.rushTarpCount > 0 && (
+                            <div className="commission-detail-row-v2">
+                              <div className="commission-info-v2">
+                                <div className="commission-badge-v2 rush">Rush Tarp</div>
+                                <span className="commission-calc-v2">
+                                  {viewingPayrollRecord.rushTarpCount} × {formatPeso(rushTarpCommissionRate)}
+                                </span>
+                              </div>
+                              <span className="commission-amount-v2">
+                                +{formatPeso(viewingPayrollRecord.rushTarpCommission)}
+                              </span>
+                            </div>
+                          )}
 
-                <div className="modal-actions">
-                  {!viewingPayrollRecord.processed && (
-                    <button 
-                      className="modal-button save"
-                      onClick={() => {
-                        handleProcessPayroll(viewingPayrollRecord)
-                        setViewingPayrollRecord(null)
-                      }}
-                    >
-                      <CheckCircle size={18} />
-                      Process Payroll
-                    </button>
-                  )}
+                          {/* Regular Commission */}
+                          {viewingPayrollRecord.regularCommissionCount > 0 && (
+                            <div className="commission-detail-row-v2">
+                              <div className="commission-info-v2">
+                                <div className="commission-badge-v2 regular">Regular</div>
+                                <span className="commission-calc-v2">
+                                  {viewingPayrollRecord.regularCommissionCount} × {formatPeso(regularCommissionRate)}
+                                </span>
+                              </div>
+                              <span className="commission-amount-v2">
+                                +{formatPeso(viewingPayrollRecord.regularCommission)}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Custom Commissions */}
+                          {viewingPayrollRecord.customCommissionCounts && 
+                           Object.keys(viewingPayrollRecord.customCommissionCounts).map(commId => {
+                              const count = viewingPayrollRecord.customCommissionCounts[commId]
+                              if (count > 0) {
+                                const commission = customCommissions.find(c => c.id === commId)
+                                if (commission) {
+                                  const amount = count * commission.rate
+                                  return (
+                                    <div key={commId} className="commission-detail-row-v2">
+                                      <div className="commission-info-v2">
+                                        <div className="commission-badge-v2 custom">{commission.name}</div>
+                                        <span className="commission-calc-v2">
+                                          {count} × {formatPeso(commission.rate)}
+                                        </span>
+                                      </div>
+                                      <span className="commission-amount-v2">
+                                        +{formatPeso(amount)}
+                                      </span>
+                                    </div>
+                                  )
+                                }
+                              }
+                              return null
+                            })}
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Deductions Section */}
+                  <div className="payroll-card-v2 expand-vertical">
+                    <div className="payroll-card-header-v2">
+                      <TrendingDown size={16} />
+                      <span>Deductions</span>
+                      {viewingPayrollRecord.totalDeductions > 0 && (
+                        <span className="deduction-total-badge-v2">
+                          -{formatPeso(viewingPayrollRecord.totalDeductions)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="payroll-card-content-v2 space-between">
+                      {viewingPayrollRecord.totalDeductions === 0 ? (
+                        <div className="no-deductions-v2">
+                          <CheckCircle size={16} />
+                          <span>No deductions this period</span>
+                        </div>
+                      ) : (
+                        <>
+                          {viewingPayrollRecord.cashAdvance > 0 && (
+                            <div className="deduction-detail-row-v2">
+                              <div className="deduction-info-v2">
+                                <CreditCard size={16} />
+                                <span>Cash Advance</span>
+                              </div>
+                              <span className="deduction-amount-v2">
+                                -{formatPeso(viewingPayrollRecord.cashAdvance)}
+                              </span>
+                            </div>
+                          )}
+                          {viewingPayrollRecord.lateMinutes > 0 && (
+                            <div className="deduction-detail-row-v2">
+                              <div className="deduction-info-v2">
+                                <Clock size={16} />
+                                <span>Late Penalty ({viewingPayrollRecord.lateMinutes} minutes)</span>
+                              </div>
+                              <span className="deduction-amount-v2">
+                                -{formatPeso(viewingPayrollRecord.lateDeduction)}
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
+
+              {/* Footer */}
+              {!viewingPayrollRecord.processed && (
+                <div className="payroll-modal-footer-v2">
+                  <button 
+                    className="payroll-process-btn-v2"
+                    onClick={() => {
+                      handleProcessPayroll(viewingPayrollRecord)
+                      setViewingPayrollRecord(null)
+                    }}
+                  >
+                    <CheckCircle size={18} />
+                    <span>Process Payroll</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -5571,6 +6058,7 @@ function Dashboard({ activeView, setActiveView }) {
                   <thead>
                     <tr>
                       <th>Employee Name</th>
+                      <th>Barcode / Access Code</th>
                       <th>Rate per {defaultHoursPerShift} Hours</th>
                       <th>Hours/Shift</th>
                       <th>Shift Type</th>
@@ -5589,6 +6077,16 @@ function Dashboard({ activeView, setActiveView }) {
                             <span>{employee.name}</span>
                                 </div>
                         </td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <span className="barcode-badge">
+                              {employee.barcode || (employee.id + 100000).toString()}
+                            </span>
+                            <span style={{ fontSize: '10px', color: '#666' }}>
+                              Login: {employee.accessCode || `AC${employee.id.toString().padStart(4, '0')}`}
+                            </span>
+                          </div>
+                        </td>
                         <td>{isManager ? formatPeso(employee.ratePer9Hours) : censorRate()}</td>
                         <td>{employee.hoursPerShift} hrs</td>
                         <td>
@@ -5601,6 +6099,13 @@ function Dashboard({ activeView, setActiveView }) {
                           <div className="action-buttons">
                             {isManager && (
                               <>
+                                <button 
+                                  className="icon-btn barcode-btn"
+                                  onClick={() => handleDownloadBarcode(employee)}
+                                  title="Download Barcode"
+                                >
+                                  <Download size={16} />
+                                </button>
                                 <button 
                                 className="icon-btn edit-btn"
                                 onClick={() => handleEditEmployee(employee)}
@@ -5842,6 +6347,13 @@ function Dashboard({ activeView, setActiveView }) {
                     {isManager && (
                       <td>
                         <div className="action-buttons-compact">
+                          <button 
+                            className="icon-btn-compact barcode"
+                            onClick={() => handleDownloadBarcode(employee)}
+                            title="Download Barcode"
+                          >
+                            <Download size={14} />
+                          </button>
                           <button 
                             className="icon-btn-compact edit"
                             onClick={() => handleEditEmployee(employee)}

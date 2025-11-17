@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Header from './Header'
 import Sidebar from './Sidebar'
+import { fetchCashAdvanceRecords } from '../lib/supabase'
 import { 
   LayoutDashboard, 
   Plus, 
@@ -45,6 +46,36 @@ import './GraphicArtistDashboard.css'
 function GraphicArtistDashboard({ user }) {
   const [currentView, setCurrentView] = useState('dashboard')
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [cashAdvanceBalance, setCashAdvanceBalance] = useState(0)
+
+  // Fetch cash advance balance for the logged-in employee
+  useEffect(() => {
+    const fetchCashAdvanceBalance = async () => {
+      if (!user?.employeeName) return
+      
+      try {
+        const records = await fetchCashAdvanceRecords()
+        // Filter records for this specific employee and only include records with outstanding balance
+        const employeeRecords = records.filter(record => 
+          record.employeeName?.toLowerCase() === user.employeeName.toLowerCase() &&
+          Number(record.balance) > 0  // Only include records with outstanding balance
+        )
+        
+        // Calculate total balance using the balance field (not amount - paid)
+        const totalBalance = employeeRecords.reduce((sum, record) => {
+          const balance = Number(record.balance) || 0
+          return sum + balance
+        }, 0)
+        
+        setCashAdvanceBalance(totalBalance)
+      } catch (error) {
+        console.error('Error fetching cash advance:', error)
+        setCashAdvanceBalance(0)
+      }
+    }
+
+    fetchCashAdvanceBalance()
+  }, [user?.employeeName])
 
   const menuItems = [
     {
@@ -85,7 +116,7 @@ function GraphicArtistDashboard({ user }) {
   const renderContent = () => {
     switch (currentView) {
       case 'dashboard':
-        return <DashboardView />
+        return <DashboardView cashAdvanceBalance={cashAdvanceBalance} />
       case 'create-order':
         return <CreateOrderView />
       case 'create-pahabol':
@@ -97,7 +128,7 @@ function GraphicArtistDashboard({ user }) {
       case 'sublimation-listing':
         return <SublimationListingView />
       default:
-        return <DashboardView />
+        return <DashboardView cashAdvanceBalance={cashAdvanceBalance} />
     }
   }
 
@@ -125,56 +156,90 @@ function GraphicArtistDashboard({ user }) {
 }
 
 // Dashboard View Component
-function DashboardView() {
+function DashboardView({ cashAdvanceBalance = 0 }) {
   const ordersForPayment = []
   const ordersPending = []
   const ordersForDesign = []
   const ordersForSublimation = []
 
+  // Format peso amount
+  const formatPeso = (amount) => {
+    return `₱${Number(amount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+
+  // Calculate next payroll date
+  const getNextPayrollDate = () => {
+    const today = new Date()
+    const currentDay = today.getDate()
+    let nextPayrollDate
+    
+    if (currentDay >= 1 && currentDay < 15) {
+      nextPayrollDate = new Date(today.getFullYear(), today.getMonth(), 15)
+    } else {
+      nextPayrollDate = new Date(today.getFullYear(), today.getMonth() + 1, 0) // Last day of month
+    }
+    
+    return nextPayrollDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
   return (
     <div className="view-container">
       <div className="view-header">
-        <h1>Graphic Artist Dashboard</h1>
-        <p>Welcome to your workspace</p>
+        <div className="header-content">
+          <div className="header-icon-wrapper">
+            <LayoutDashboard size={24} />
+          </div>
+          <div>
+            <h1>Graphic Artist Dashboard</h1>
+            <p>Welcome to your workspace</p>
+          </div>
+        </div>
       </div>
       
-      {/* Stats Cards */}
+      {/* Remastered Stats Cards */}
       <div className="dashboard-stats">
-        <div className="stat-card">
-          <div className="stat-icon">
-            <Package size={20} />
+        <div className="stat-card primary-card">
+          <div className="stat-card-header">
+            <div className="stat-card-icon">
+              <Package size={20} />
+            </div>
+            <span className="stat-card-label">Pending Orders</span>
           </div>
-          <div className="stat-content">
-            <h3>Pending Orders</h3>
-            <p className="stat-value">0</p>
-          </div>
+          <div className="stat-card-value">0</div>
+          <div className="stat-card-footer">Active work items</div>
         </div>
+        
         <div className="stat-card">
-          <div className="stat-icon">
-            <CheckCircle size={20} />
+          <div className="stat-card-header">
+            <div className="stat-card-icon">
+              <CheckCircle size={20} />
+            </div>
+            <span className="stat-card-label">Completed</span>
           </div>
-          <div className="stat-content">
-            <h3>Completed Orders</h3>
-            <p className="stat-value">0</p>
-          </div>
+          <div className="stat-card-value">0</div>
+          <div className="stat-card-footer">Total completed</div>
         </div>
-        <div className="stat-card">
-          <div className="stat-icon">
-            <CreditCard size={20} />
+        
+        <div className="stat-card highlight-card">
+          <div className="stat-card-header">
+            <div className="stat-card-icon">
+              <CreditCard size={20} />
+            </div>
+            <span className="stat-card-label">Cash Advance</span>
           </div>
-          <div className="stat-content">
-            <h3>Cash Advance</h3>
-            <p className="stat-value">₱0.00</p>
-          </div>
+          <div className="stat-card-value">{formatPeso(cashAdvanceBalance)}</div>
+          <div className="stat-card-footer">{cashAdvanceBalance > 0 ? 'Outstanding balance' : 'No balance'}</div>
         </div>
+        
         <div className="stat-card">
-          <div className="stat-icon">
-            <Calendar size={20} />
+          <div className="stat-card-header">
+            <div className="stat-card-icon">
+              <Calendar size={20} />
+            </div>
+            <span className="stat-card-label">Next Payroll</span>
           </div>
-          <div className="stat-content">
-            <h3>Next Payroll</h3>
-            <p className="stat-value">-</p>
-          </div>
+          <div className="stat-card-value">{getNextPayrollDate()}</div>
+          <div className="stat-card-footer">Upcoming date</div>
         </div>
       </div>
 
@@ -2009,7 +2074,7 @@ function CreateOrderView() {
 
             {/* Graphic Artist Info Card */}
             {sublimationData.assignedArtist && (
-              <div className="form-section">
+              <div className="form-section artist-info-section">
                 <h3 className="form-section-title">Artist Information</h3>
                 <div className="artist-info-card">
                   <div className="artist-header">
@@ -2916,8 +2981,15 @@ function CreatePahabolView() {
   return (
     <div className="view-container">
       <div className="view-header">
-        <h1>Create Pahabol</h1>
-        <p>Create a rush/pahabol order</p>
+        <div className="header-content">
+          <div className="header-icon-wrapper">
+            <Clock size={24} />
+          </div>
+          <div>
+            <h1>Create Pahabol</h1>
+            <p>Create a rush/pahabol order</p>
+          </div>
+        </div>
       </div>
       <div className="content-placeholder">
         <Clock size={48} />
@@ -2932,8 +3004,15 @@ function OrderTrackingView() {
   return (
     <div className="view-container">
       <div className="view-header">
-        <h1>Order Tracking</h1>
-        <p>Track all orders</p>
+        <div className="header-content">
+          <div className="header-icon-wrapper">
+            <Package size={24} />
+          </div>
+          <div>
+            <h1>Order Tracking</h1>
+            <p>Track all orders</p>
+          </div>
+        </div>
       </div>
       <div className="content-placeholder">
         <Package size={48} />
@@ -2948,8 +3027,15 @@ function SublimationOrdersView() {
   return (
     <div className="view-container">
       <div className="view-header">
-        <h1>Sublimation Orders</h1>
-        <p>Manage sublimation orders</p>
+        <div className="header-content">
+          <div className="header-icon-wrapper">
+            <Image size={24} />
+          </div>
+          <div>
+            <h1>Sublimation Orders</h1>
+            <p>Manage sublimation orders</p>
+          </div>
+        </div>
       </div>
       <div className="content-placeholder">
         <Palette size={48} />
@@ -2964,8 +3050,15 @@ function SublimationListingView() {
   return (
     <div className="view-container">
       <div className="view-header">
-        <h1>Sublimation Listing</h1>
-        <p>View all sublimation products</p>
+        <div className="header-content">
+          <div className="header-icon-wrapper">
+            <List size={24} />
+          </div>
+          <div>
+            <h1>Sublimation Listing</h1>
+            <p>View all sublimation products</p>
+          </div>
+        </div>
       </div>
       <div className="content-placeholder">
         <List size={48} />

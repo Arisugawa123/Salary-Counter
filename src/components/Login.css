@@ -1114,3 +1114,68 @@
   }
 }
 
+/* Time Clock Hint Badge */
+.time-clock-hint {
+  position: absolute;
+  bottom: -60px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 12px;
+  color: #93c5fd;
+  font-size: 0.9rem;
+  font-weight: 500;
+  backdrop-filter: blur(10px);
+  animation: hintPulse 3s ease-in-out infinite;
+  white-space: nowrap;
+  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.2);
+}
+
+.time-clock-hint svg {
+  flex-shrink: 0;
+  color: #60a5fa;
+}
+
+.time-clock-hint kbd {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #bfdbfe;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  margin: 0 0.2rem;
+}
+
+@keyframes hintPulse {
+  0%, 100% {
+    transform: translateX(-50%) translateY(0);
+    box-shadow: 0 4px 20px rgba(59, 130, 246, 0.2);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-3px);
+    box-shadow: 0 6px 25px rgba(59, 130, 246, 0.4);
+  }
+}
+
+@media (max-width: 640px) {
+  .time-clock-hint {
+    font-size: 0.75rem;
+    padding: 0.6rem 1rem;
+    bottom: -50px;
+  }
+  
+  .time-clock-hint kbd {
+    padding: 0.15rem 0.4rem;
+    font-size: 0.75rem;
+  }
+}
+

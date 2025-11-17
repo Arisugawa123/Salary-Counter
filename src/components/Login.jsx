@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { UserCheck, Shield, Lock, CheckCircle, Key, Eye, DollarSign, Sparkles, TrendingUp, Users, Calendar, Clock, Play, X, Palette } from 'lucide-react'
+import TimeClockDashboard from './TimeClockDashboard'
 import './Login.css'
 
 const Login = () => {
@@ -14,6 +15,7 @@ const Login = () => {
   const [isExiting, setIsExiting] = useState(false)
   const [showAccessCode, setShowAccessCode] = useState(false)
   const [showEmployeeFields, setShowEmployeeFields] = useState(false)
+  const [showTimeClock, setShowTimeClock] = useState(false)
   
   // Trailer carousel state
   const [activeTrailer, setActiveTrailer] = useState(null) // null = show thumbnails, 0 = yotei, 1 = battlefield, 2 = gta6
@@ -241,6 +243,24 @@ const Login = () => {
     }
   }
 
+  // CTRL+A handler to open Time Clock Dashboard
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.ctrlKey && e.key === 'a') {
+        e.preventDefault()
+        setShowTimeClock(true)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  // If time clock is active, show it
+  if (showTimeClock) {
+    return <TimeClockDashboard onExit={() => setShowTimeClock(false)} />
+  }
+
   return (
     <div className="login-container">
       <div className="login-background">
@@ -425,6 +445,12 @@ const Login = () => {
 
         <div className="login-footer">
           <p>© 2024 IRONWOLF SHOP SYSTEM v1.2.1</p>
+        </div>
+
+        {/* Time Clock Access Hint */}
+        <div className="time-clock-hint">
+          <Clock size={18} />
+          <span>Press <kbd>CTRL</kbd> + <kbd>A</kbd> for Time Clock</span>
         </div>
       </div>
 
