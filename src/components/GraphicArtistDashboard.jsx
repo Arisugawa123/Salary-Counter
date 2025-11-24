@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import Header from './Header'
 import Sidebar from './Sidebar'
-import { fetchCashAdvanceRecords } from '../lib/supabase'
+import { fetchCashAdvanceRecords, fetchTimeRecords, fetchDayOffRecords, createCashAdvanceRecord } from '../lib/supabase'
 import { 
   LayoutDashboard, 
   Plus, 
@@ -39,7 +39,8 @@ import {
   Wallet,
   DollarSign,
   AlertCircle,
-  Briefcase
+  Briefcase,
+  ArrowLeft
 } from 'lucide-react'
 import './GraphicArtistDashboard.css'
 
@@ -84,6 +85,11 @@ function GraphicArtistDashboard({ user }) {
       icon: LayoutDashboard
     },
     {
+      id: 'employee-dashboard',
+      label: 'Employee Dashboard',
+      icon: Users
+    },
+    {
       id: 'create-order',
       label: 'Create Order',
       icon: Plus
@@ -117,6 +123,8 @@ function GraphicArtistDashboard({ user }) {
     switch (currentView) {
       case 'dashboard':
         return <DashboardView cashAdvanceBalance={cashAdvanceBalance} />
+      case 'employee-dashboard':
+        return <EmployeeDashboardView user={user} />
       case 'create-order':
         return <CreateOrderView />
       case 'create-pahabol':
@@ -157,6 +165,9 @@ function GraphicArtistDashboard({ user }) {
 
 // Dashboard View Component
 function DashboardView({ cashAdvanceBalance = 0 }) {
+  const [currentOrdersTab, setCurrentOrdersTab] = useState('payment')
+  const [productionStatusTab, setProductionStatusTab] = useState('design')
+  
   const ordersForPayment = []
   const ordersPending = []
   const ordersForDesign = []
@@ -165,6 +176,16 @@ function DashboardView({ cashAdvanceBalance = 0 }) {
   // Format peso amount
   const formatPeso = (amount) => {
     return `₱${Number(amount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+  
+  // Get current orders based on active tab
+  const getCurrentOrders = () => {
+    return currentOrdersTab === 'payment' ? ordersForPayment : ordersPending
+  }
+  
+  // Get production orders based on active tab
+  const getProductionOrders = () => {
+    return productionStatusTab === 'design' ? ordersForDesign : ordersForSublimation
   }
 
   // Calculate next payroll date
@@ -243,48 +264,143 @@ function DashboardView({ cashAdvanceBalance = 0 }) {
         </div>
       </div>
 
-      {/* Orders Tables */}
+      {/* Orders Tables - Remastered */}
       <div className="tables-container">
-        {/* For Payment & Pending Orders Table */}
-        <div className="table-section">
-          <div className="table-header">
-            <h2>Current Orders</h2>
+        {/* Current Orders Table - Remastered */}
+        <div className="table-section remastered-table">
+          <div className="table-header remastered-header">
+            <div className="table-header-content">
+              <div className="table-header-icon">
+                <Package size={20} />
+              </div>
+              <div>
+                <h2>Current Orders</h2>
+                <p className="table-subtitle">Payment and pending orders</p>
+              </div>
+            </div>
           </div>
-          <div className="table-tabs">
-            <button className="tab-btn active">For Payment ({ordersForPayment.length})</button>
-            <button className="tab-btn">Pending ({ordersPending.length})</button>
+          <div className="table-tabs remastered-tabs">
+            <button 
+              className={`tab-btn remastered-tab ${currentOrdersTab === 'payment' ? 'active' : ''}`}
+              onClick={() => setCurrentOrdersTab('payment')}
+            >
+              <CreditCard size={14} />
+              <span>For Payment</span>
+              <span className="tab-count">{ordersForPayment.length}</span>
+            </button>
+            <button 
+              className={`tab-btn remastered-tab ${currentOrdersTab === 'pending' ? 'active' : ''}`}
+              onClick={() => setCurrentOrdersTab('pending')}
+            >
+              <Clock size={14} />
+              <span>Pending</span>
+              <span className="tab-count">{ordersPending.length}</span>
+            </button>
           </div>
-          <div className="table-wrapper">
-            <table className="orders-table">
+          <div className="table-wrapper remastered-wrapper">
+            <table className="orders-table remastered-orders-table">
               <thead>
                 <tr>
-                  <th>Order ID</th>
-                  <th>Customer</th>
-                  <th>Product</th>
-                  <th>Quantity</th>
-                  <th>Amount</th>
-                  <th>Date</th>
-                  <th>Status</th>
+                  <th>
+                    <div className="th-content">
+                      <Hash size={12} />
+                      <span>Order ID</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className="th-content">
+                      <User size={12} />
+                      <span>Customer</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className="th-content">
+                      <Package2 size={12} />
+                      <span>Product</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className="th-content">
+                      <span>Quantity</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className="th-content">
+                      <DollarSign size={12} />
+                      <span>Amount</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className="th-content">
+                      <Calendar size={12} />
+                      <span>Date</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className="th-content">
+                      <span>Status</span>
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {ordersForPayment.length === 0 ? (
+                {getCurrentOrders().length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="empty-table">
-                      <Package size={40} />
-                      <p>No orders for payment</p>
+                    <td colSpan="7" className="empty-table remastered-empty">
+                      <div className="empty-state">
+                        <div className="empty-icon-wrapper">
+                          <Package size={48} />
+                        </div>
+                        <h3>{currentOrdersTab === 'payment' ? 'No Orders for Payment' : 'No Pending Orders'}</h3>
+                        <p>{currentOrdersTab === 'payment' 
+                          ? 'All orders have been processed or no new orders are available'
+                          : 'No pending orders at this time'}
+                        </p>
+                      </div>
                     </td>
                   </tr>
                 ) : (
-                  ordersForPayment.map(order => (
-                    <tr key={order.id}>
-                      <td>{order.id}</td>
-                      <td>{order.customer}</td>
-                      <td>{order.product}</td>
-                      <td>{order.quantity}</td>
-                      <td>{order.amount}</td>
-                      <td>{order.date}</td>
-                      <td><span className="status-badge for-payment">For Payment</span></td>
+                  getCurrentOrders().map(order => (
+                    <tr key={order.id} className="remastered-row">
+                      <td className="order-id-cell">
+                        <span className="order-id-badge">#{order.id}</span>
+                      </td>
+                      <td className="customer-cell">
+                        <div className="cell-content">
+                          <div className="cell-icon">
+                            <User size={14} />
+                          </div>
+                          <span>{order.customer}</span>
+                        </div>
+                      </td>
+                      <td className="product-cell">
+                        <div className="cell-content">
+                          <div className="cell-icon">
+                            <Package2 size={14} />
+                          </div>
+                          <span>{order.product}</span>
+                        </div>
+                      </td>
+                      <td className="quantity-cell">
+                        <span className="quantity-badge">{order.quantity}</span>
+                      </td>
+                      <td className="amount-cell">
+                        <span className="amount-value">{formatPeso(order.amount)}</span>
+                      </td>
+                      <td className="date-cell">
+                        <div className="cell-content">
+                          <div className="cell-icon">
+                            <Calendar size={14} />
+                          </div>
+                          <span>{order.date}</span>
+                        </div>
+                      </td>
+                      <td className="status-cell">
+                        <span className={`status-badge remastered-badge ${currentOrdersTab === 'payment' ? 'for-payment' : 'pending'}`}>
+                          {currentOrdersTab === 'payment' ? <CreditCard size={10} /> : <Clock size={10} />}
+                          <span>{currentOrdersTab === 'payment' ? 'For Payment' : 'Pending'}</span>
+                        </span>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -293,46 +409,146 @@ function DashboardView({ cashAdvanceBalance = 0 }) {
           </div>
         </div>
 
-        {/* Production Process Table */}
-        <div className="table-section">
-          <div className="table-header">
-            <h2>Production Status</h2>
+        {/* Production Status Table - Remastered */}
+        <div className="table-section remastered-table">
+          <div className="table-header remastered-header">
+            <div className="table-header-content">
+              <div className="table-header-icon">
+                <Palette size={20} />
+              </div>
+              <div>
+                <h2>Production Status</h2>
+                <p className="table-subtitle">Design and sublimation progress</p>
+              </div>
+            </div>
           </div>
-          <div className="table-tabs">
-            <button className="tab-btn active">For Design Process ({ordersForDesign.length})</button>
-            <button className="tab-btn">Sublimation Process ({ordersForSublimation.length})</button>
+          <div className="table-tabs remastered-tabs">
+            <button 
+              className={`tab-btn remastered-tab ${productionStatusTab === 'design' ? 'active' : ''}`}
+              onClick={() => setProductionStatusTab('design')}
+            >
+              <Paintbrush size={14} />
+              <span>Design Process</span>
+              <span className="tab-count">{ordersForDesign.length}</span>
+            </button>
+            <button 
+              className={`tab-btn remastered-tab ${productionStatusTab === 'sublimation' ? 'active' : ''}`}
+              onClick={() => setProductionStatusTab('sublimation')}
+            >
+              <Image size={14} />
+              <span>Sublimation</span>
+              <span className="tab-count">{ordersForSublimation.length}</span>
+            </button>
           </div>
-          <div className="table-wrapper">
-            <table className="orders-table">
+          <div className="table-wrapper remastered-wrapper">
+            <table className="orders-table remastered-orders-table">
               <thead>
                 <tr>
-                  <th>Order ID</th>
-                  <th>Customer</th>
-                  <th>Product</th>
-                  <th>Quantity</th>
-                  <th>Progress</th>
-                  <th>Deadline</th>
-                  <th>Status</th>
+                  <th>
+                    <div className="th-content">
+                      <Hash size={12} />
+                      <span>Order ID</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className="th-content">
+                      <User size={12} />
+                      <span>Customer</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className="th-content">
+                      <Package2 size={12} />
+                      <span>Product</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className="th-content">
+                      <span>Quantity</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className="th-content">
+                      <RotateCw size={12} />
+                      <span>Progress</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className="th-content">
+                      <CalendarCheck size={12} />
+                      <span>Deadline</span>
+                    </div>
+                  </th>
+                  <th>
+                    <div className="th-content">
+                      <span>Status</span>
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {ordersForDesign.length === 0 ? (
+                {getProductionOrders().length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="empty-table">
-                      <Palette size={40} />
-                      <p>No orders in design process</p>
+                    <td colSpan="7" className="empty-table remastered-empty">
+                      <div className="empty-state">
+                        <div className="empty-icon-wrapper">
+                          {productionStatusTab === 'design' ? <Palette size={48} /> : <Image size={48} />}
+                        </div>
+                        <h3>{productionStatusTab === 'design' ? 'No Orders in Design' : 'No Orders in Sublimation'}</h3>
+                        <p>{productionStatusTab === 'design' 
+                          ? 'All design orders are complete or no orders are in the design queue'
+                          : 'All sublimation orders are complete or no orders are in the sublimation queue'}
+                        </p>
+                      </div>
                     </td>
                   </tr>
                 ) : (
-                  ordersForDesign.map(order => (
-                    <tr key={order.id}>
-                      <td>{order.id}</td>
-                      <td>{order.customer}</td>
-                      <td>{order.product}</td>
-                      <td>{order.quantity}</td>
-                      <td>{order.progress}</td>
-                      <td>{order.deadline}</td>
-                      <td><span className="status-badge in-design">For Design</span></td>
+                  getProductionOrders().map(order => (
+                    <tr key={order.id} className="remastered-row">
+                      <td className="order-id-cell">
+                        <span className="order-id-badge">#{order.id}</span>
+                      </td>
+                      <td className="customer-cell">
+                        <div className="cell-content">
+                          <div className="cell-icon">
+                            <User size={14} />
+                          </div>
+                          <span>{order.customer}</span>
+                        </div>
+                      </td>
+                      <td className="product-cell">
+                        <div className="cell-content">
+                          <div className="cell-icon">
+                            <Package2 size={14} />
+                          </div>
+                          <span>{order.product}</span>
+                        </div>
+                      </td>
+                      <td className="quantity-cell">
+                        <span className="quantity-badge">{order.quantity}</span>
+                      </td>
+                      <td className="progress-cell">
+                        <div className="progress-container">
+                          <div className="progress-bar">
+                            <div className="progress-fill" style={{ width: `${order.progress || 0}%` }}></div>
+                          </div>
+                          <span className="progress-text">{order.progress || 0}%</span>
+                        </div>
+                      </td>
+                      <td className="deadline-cell">
+                        <div className="cell-content">
+                          <div className="cell-icon">
+                            <CalendarCheck size={14} />
+                          </div>
+                          <span>{order.deadline}</span>
+                        </div>
+                      </td>
+                      <td className="status-cell">
+                        <span className={`status-badge remastered-badge ${productionStatusTab === 'design' ? 'in-design' : 'in-sublimation'}`}>
+                          {productionStatusTab === 'design' ? <Paintbrush size={10} /> : <Image size={10} />}
+                          <span>{productionStatusTab === 'design' ? 'In Design' : 'In Sublimation'}</span>
+                        </span>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -341,6 +557,515 @@ function DashboardView({ cashAdvanceBalance = 0 }) {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Employee Dashboard View Component
+function EmployeeDashboardView({ user }) {
+  const [employees, setEmployees] = useState([])
+  const [timeRecords, setTimeRecords] = useState([])
+  const [cashAdvanceRecords, setCashAdvanceRecords] = useState([])
+  const [dayOffRecords, setDayOffRecords] = useState([])
+  const [selectedEmployee, setSelectedEmployee] = useState(null)
+  const [showCashAdvanceModal, setShowCashAdvanceModal] = useState(false)
+  const [cashAdvanceForm, setCashAdvanceForm] = useState({
+    amount: '',
+    date: new Date().toISOString().split('T')[0],
+    notes: ''
+  })
+  
+  // Get the logged-in employee
+  const loggedInEmployee = employees.find(emp => 
+    emp.name?.toLowerCase() === user?.employeeName?.toLowerCase()
+  )
+  
+  // Filter to only show logged-in employee
+  const displayEmployees = loggedInEmployee ? [loggedInEmployee] : []
+
+  // Format peso amount
+  const formatPeso = (amount) => {
+    return `₱${Number(amount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+
+  // Format date
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A'
+    const date = new Date(dateString)
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  // Fetch all data
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const { fetchEmployees, fetchTimeRecords, fetchCashAdvanceRecords, fetchDayOffRecords } = await import('../lib/supabase')
+        const [emps, timeRecs, cashRecs, dayOffs] = await Promise.all([
+          fetchEmployees(),
+          fetchTimeRecords(),
+          fetchCashAdvanceRecords(),
+          fetchDayOffRecords()
+        ])
+        setEmployees(emps)
+        setTimeRecords(timeRecs)
+        setCashAdvanceRecords(cashRecs)
+        setDayOffRecords(dayOffs)
+      } catch (error) {
+        console.error('Error fetching data:', error)
+      }
+    }
+    loadData()
+  }, [])
+
+  // Get latest payroll for employee
+  const getLatestPayroll = (employeeId) => {
+    const records = timeRecords.filter(r => r.employeeId === employeeId)
+    if (records.length === 0) return null
+    return records.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
+  }
+
+  // Get cash advance balance for employee
+  const getCashAdvanceBalance = (employeeId, employeeName) => {
+    const records = cashAdvanceRecords.filter(r => 
+      r.employeeId === employeeId || 
+      (r.employeeName && r.employeeName.toLowerCase() === employeeName.toLowerCase())
+    )
+    return records.reduce((sum, r) => sum + (Number(r.balance) || 0), 0)
+  }
+
+  // Get upcoming day offs for employee
+  const getUpcomingDayOffs = (employeeId, employeeName) => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    
+    const records = dayOffRecords.filter(r => {
+      const isEmployee = r.employeeId === employeeId || 
+        (r.employeeName && r.employeeName.toLowerCase() === employeeName.toLowerCase())
+      if (!isEmployee) return false
+      
+      const recordDate = new Date(r.date)
+      recordDate.setHours(0, 0, 0, 0)
+      return recordDate >= today
+    })
+    
+    return records.sort((a, b) => new Date(a.date) - new Date(b.date))
+  }
+
+  // Handle cash advance request
+  const handleRequestCashAdvance = async () => {
+    if (!selectedEmployee || !cashAdvanceForm.amount) {
+      alert('Please fill in all required fields')
+      return
+    }
+
+    try {
+      const { createCashAdvanceRecord } = await import('../lib/supabase')
+      const amount = Number(cashAdvanceForm.amount)
+      const newRecord = {
+        employeeId: selectedEmployee.id,
+        employeeName: selectedEmployee.name,
+        amount: amount,
+        date: cashAdvanceForm.date,
+        notes: cashAdvanceForm.notes || '',
+        balance: amount,
+        payments: []
+      }
+      
+      await createCashAdvanceRecord(newRecord)
+      
+      // Reload cash advance records
+      const { fetchCashAdvanceRecords } = await import('../lib/supabase')
+      const updated = await fetchCashAdvanceRecords()
+      setCashAdvanceRecords(updated)
+      
+      // Reset form
+      setShowCashAdvanceModal(false)
+      setSelectedEmployee(null)
+      setCashAdvanceForm({
+        amount: '',
+        date: new Date().toISOString().split('T')[0],
+        notes: ''
+      })
+      
+      alert('Cash advance request submitted successfully!')
+    } catch (error) {
+      console.error('Error creating cash advance:', error)
+      alert('Failed to submit cash advance request. Please try again.')
+    }
+  }
+
+  const [showDTRRecords, setShowDTRRecords] = useState(false)
+  const [dtrRecords, setDtrRecords] = useState([])
+
+  // Fetch DTR records
+  const fetchDTRRecords = async (employeeId, employeeName) => {
+    try {
+      const { supabase } = await import('../lib/supabase')
+      const { data, error } = await supabase
+        .from('dtr_records')
+        .select('*')
+        .eq('employee_id', employeeId)
+        .order('date', { ascending: false })
+        .limit(30)
+      
+      if (error) throw error
+      setDtrRecords((data || []).map(record => ({
+        id: record.id,
+        date: record.date,
+        am_in: record.am_in,
+        am_out: record.am_out,
+        pm_in: record.pm_in,
+        pm_out: record.pm_out,
+        ot_in: record.ot_in,
+        ot_out: record.ot_out
+      })))
+      setShowDTRRecords(true)
+    } catch (error) {
+      console.error('Error fetching DTR records:', error)
+      alert('Failed to load DTR records')
+    }
+  }
+
+  return (
+    <div className="view-container employee-dashboard-full">
+      {!showDTRRecords ? (
+        <>
+          <div className="view-header">
+            <div className="header-content">
+              <div className="header-icon-wrapper">
+                <Users size={24} />
+              </div>
+              <div>
+                <h1>Employee Dashboard</h1>
+                <p>View your employee information and status</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="employee-dashboard-main">
+            {!user?.employeeName ? (
+              <div className="empty-state-container">
+                <div className="empty-state">
+                  <div className="empty-icon-wrapper">
+                    <AlertCircle size={48} />
+                  </div>
+                  <h3>Not Logged In</h3>
+                  <p>Please log in to view your employee information</p>
+                </div>
+              </div>
+            ) : displayEmployees.length === 0 ? (
+              <div className="empty-state-container">
+                <div className="empty-state">
+                  <div className="empty-icon-wrapper">
+                    <Users size={48} />
+                  </div>
+                  <h3>Employee Not Found</h3>
+                  <p>No employee record found for {user.employeeName}</p>
+                </div>
+              </div>
+            ) : (
+              displayEmployees.map(employee => {
+                const latestPayroll = getLatestPayroll(employee.id)
+                const cashAdvanceBalance = getCashAdvanceBalance(employee.id, employee.name)
+                const upcomingDayOffs = getUpcomingDayOffs(employee.id, employee.name)
+                
+                return (
+                  <div key={employee.id} className="employee-dashboard-wrapper">
+                    {/* Employee Profile Card */}
+                    <div className="employee-profile-card">
+                      <div className="employee-profile-header">
+                        <div className="employee-avatar-large">
+                          <User size={32} />
+                        </div>
+                        <div className="employee-profile-info">
+                          <h2>{employee.name}</h2>
+                          <div className="employee-profile-meta">
+                            <span className="employee-id">ID: #{employee.id}</span>
+                            <span className={`shift-badge ${employee.shiftType === 'first' ? 'first-shift' : 'second-shift'}`}>
+                              {employee.shiftType === 'first' ? 'First Shift' : 'Second Shift'}
+                            </span>
+                          </div>
+                          <div className="employee-rate-info">
+                            <span className="rate-display-large">{formatPeso(employee.ratePer9Hours || 0)}</span>
+                            <span className="rate-label">Rate per 9 hours</span>
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        className="btn-view-dtr"
+                        onClick={() => fetchDTRRecords(employee.id, employee.name)}
+                      >
+                        <FileText size={18} />
+                        <span>View DTR Records</span>
+                      </button>
+                    </div>
+
+                    {/* 4 Main Cards Grid */}
+                    <div className="employee-cards-grid">
+                      {/* Card 1: Latest Payroll */}
+                      <div className="employee-main-card">
+                        <div className="employee-main-card-header">
+                          <div className="card-icon payroll-icon">
+                            <DollarSign size={24} />
+                          </div>
+                          <h3>Latest Payroll</h3>
+                        </div>
+                        <div className="employee-main-card-body">
+                          {latestPayroll ? (
+                            <>
+                              <div className="card-stat-large">
+                                <span className="stat-label">Net Pay</span>
+                                <span className="stat-value-large highlight">{formatPeso(latestPayroll.netPay || 0)}</span>
+                              </div>
+                              <div className="card-details">
+                                <div className="detail-item">
+                                  <span className="detail-label">Period:</span>
+                                  <span className="detail-value">{latestPayroll.month} {latestPayroll.year} ({latestPayroll.payPeriod})</span>
+                                </div>
+                                <div className="detail-item">
+                                  <span className="detail-label">Gross Pay:</span>
+                                  <span className="detail-value">{formatPeso(latestPayroll.grossPay || 0)}</span>
+                                </div>
+                                <div className="detail-item">
+                                  <span className="detail-label">Date:</span>
+                                  <span className="detail-value">{formatDate(latestPayroll.createdAt)}</span>
+                                </div>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="no-data-card">
+                              <span className="no-data">No payroll records</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Card 2: Cash Advance */}
+                      <div className="employee-main-card">
+                        <div className="employee-main-card-header">
+                          <div className="card-icon cash-advance-icon">
+                            <Wallet size={24} />
+                          </div>
+                          <h3>Cash Advance</h3>
+                        </div>
+                        <div className="employee-main-card-body">
+                          <div className="card-stat-large">
+                            <span className="stat-label">Current Balance</span>
+                            <span className={`stat-value-large ${cashAdvanceBalance > 0 ? 'warning' : 'success'}`}>
+                              {formatPeso(cashAdvanceBalance)}
+                            </span>
+                          </div>
+                          <button
+                            className="btn-request-cash-advance-main"
+                            onClick={() => {
+                              setSelectedEmployee(employee)
+                              setShowCashAdvanceModal(true)
+                            }}
+                          >
+                            <Plus size={16} />
+                            <span>Request Cash Advance</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Card 3: Day Offs */}
+                      <div className="employee-main-card">
+                        <div className="employee-main-card-header">
+                          <div className="card-icon day-off-icon">
+                            <Calendar size={24} />
+                          </div>
+                          <h3>Upcoming Day Offs</h3>
+                        </div>
+                        <div className="employee-main-card-body">
+                          {upcomingDayOffs.length > 0 ? (
+                            <div className="day-offs-list-main">
+                              {upcomingDayOffs.slice(0, 5).map((dayOff, idx) => (
+                                <div key={idx} className="day-off-item-main">
+                                  <CalendarCheck size={16} />
+                                  <div className="day-off-info">
+                                    <span className="day-off-date">{formatDate(dayOff.date)}</span>
+                                    {dayOff.isQualified && (
+                                      <span className="qualified-badge-main">Qualified</span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                              {upcomingDayOffs.length > 5 && (
+                                <div className="more-day-offs-main">+{upcomingDayOffs.length - 5} more</div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="no-data-card">
+                              <span className="no-data">No upcoming day offs</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Card 4: Access Information */}
+                      <div className="employee-main-card">
+                        <div className="employee-main-card-header">
+                          <div className="card-icon access-icon">
+                            <Hash size={24} />
+                          </div>
+                          <h3>Access Information</h3>
+                        </div>
+                        <div className="employee-main-card-body">
+                          <div className="access-info-main">
+                            <div className="access-item">
+                              <div className="access-item-header">
+                                <Package2 size={16} />
+                                <span>Access Code</span>
+                              </div>
+                              <span className="access-value">{employee.accessCode || 'N/A'}</span>
+                            </div>
+                            <div className="access-item">
+                              <div className="access-item-header">
+                                <Package2 size={16} />
+                                <span>Barcode</span>
+                              </div>
+                              <span className="access-value">{employee.barcode || 'N/A'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </>
+      ) : (
+        /* DTR Records View */
+        <div className="dtr-records-view">
+          <div className="dtr-header">
+            <button
+              className="btn-back-dtr"
+              onClick={() => setShowDTRRecords(false)}
+            >
+              <ArrowLeft size={20} />
+              <span>Back to Dashboard</span>
+            </button>
+            <h2>DTR Records</h2>
+          </div>
+          <div className="dtr-table-container">
+            <table className="dtr-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>AM In</th>
+                  <th>AM Out</th>
+                  <th>PM In</th>
+                  <th>PM Out</th>
+                  <th>OT In</th>
+                  <th>OT Out</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dtrRecords.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="empty-dtr">
+                      <div className="empty-state">
+                        <FileText size={48} />
+                        <p>No DTR records found</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  dtrRecords.map(record => (
+                    <tr key={record.id}>
+                      <td>{formatDate(record.date)}</td>
+                      <td>{record.am_in || '-'}</td>
+                      <td>{record.am_out || '-'}</td>
+                      <td>{record.pm_in || '-'}</td>
+                      <td>{record.pm_out || '-'}</td>
+                      <td>{record.ot_in || '-'}</td>
+                      <td>{record.ot_out || '-'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Cash Advance Request Modal */}
+      {showCashAdvanceModal && selectedEmployee && (
+        <div className="modal-overlay" onClick={() => {
+          setShowCashAdvanceModal(false)
+          setSelectedEmployee(null)
+          setCashAdvanceForm({
+            amount: '',
+            date: new Date().toISOString().split('T')[0],
+            notes: ''
+          })
+        }}>
+          <div className="modal-content employee-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Request Cash Advance</h2>
+              <p>Employee: {selectedEmployee.name}</p>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Amount *</label>
+                <input
+                  type="number"
+                  value={cashAdvanceForm.amount}
+                  onChange={(e) => setCashAdvanceForm({ ...cashAdvanceForm, amount: e.target.value })}
+                  placeholder="Enter amount"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+              <div className="form-group">
+                <label>Date *</label>
+                <input
+                  type="date"
+                  value={cashAdvanceForm.date}
+                  onChange={(e) => setCashAdvanceForm({ ...cashAdvanceForm, date: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>Notes</label>
+                <textarea
+                  value={cashAdvanceForm.notes}
+                  onChange={(e) => setCashAdvanceForm({ ...cashAdvanceForm, notes: e.target.value })}
+                  placeholder="Optional notes"
+                  rows="3"
+                />
+              </div>
+              <div className="current-balance-info">
+                <span>Current Balance: </span>
+                <strong>{formatPeso(getCashAdvanceBalance(selectedEmployee.id, selectedEmployee.name))}</strong>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button
+                className="btn-cancel"
+                onClick={() => {
+                  setShowCashAdvanceModal(false)
+                  setSelectedEmployee(null)
+                  setCashAdvanceForm({
+                    amount: '',
+                    date: new Date().toISOString().split('T')[0],
+                    notes: ''
+                  })
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-submit"
+                onClick={handleRequestCashAdvance}
+              >
+                Submit Request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
