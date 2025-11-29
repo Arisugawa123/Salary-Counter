@@ -1,0 +1,13 @@
+{
+  "name": "print-server",
+  "version": "1.0.0",
+  "description": "Network print server for xprinter",
+  "main": "print-server.js",
+  "scripts": {
+    "start": "node print-server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
+

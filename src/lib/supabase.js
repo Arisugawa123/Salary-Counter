@@ -42,9 +42,15 @@ const toCamelCase = (obj) => {
 const toSnakeCase = (obj) => {
   if (!obj) return obj
   if (typeof obj !== 'object') return obj
+  if (Array.isArray(obj)) return obj.map(toSnakeCase)
   
   const snakeObj = {}
   for (const [key, value] of Object.entries(obj)) {
+    // Skip null or undefined values
+    if (value === null || value === undefined) {
+      continue
+    }
+    
     // Convert camelCase to snake_case, handling numbers properly
     const snakeKey = key
       .replace(/([A-Z])/g, '_$1')
@@ -53,9 +59,17 @@ const toSnakeCase = (obj) => {
       .toLowerCase()
       .replace(/^_/, '') // Remove leading underscore if any
     
-    snakeObj[snakeKey] = typeof value === 'object' && value !== null && !Array.isArray(value)
-      ? toSnakeCase(value)
-      : value
+    // Handle nested objects (but not arrays or null)
+    if (typeof value === 'object' && !Array.isArray(value) && value !== null) {
+      // Special handling for JSONB fields - keep as is
+      if (snakeKey === 'order_data') {
+        snakeObj[snakeKey] = value
+      } else {
+        snakeObj[snakeKey] = toSnakeCase(value)
+      }
+    } else {
+      snakeObj[snakeKey] = value
+    }
   }
   return snakeObj
 }
@@ -355,5 +369,145 @@ export const updateSettings = async (settings) => {
     }
     return toCamelCase(data)
   }
+}
+
+// ==================== CUSTOMERS ====================
+
+export const fetchCustomers = async (searchTerm = '') => {
+  let query = supabase
+    .from('customers')
+    .select('*')
+    .order('name', { ascending: true })
+  
+  if (searchTerm) {
+    query = query.or(`name.ilike.%${searchTerm}%,contact_number.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`)
+  }
+  
+  const { data, error } = await query
+
+  if (error) {
+    console.error('Error fetching customers:', error)
+    throw error
+  }
+  return (data || []).map(toCamelCase)
+}
+
+export const fetchCustomerById = async (id) => {
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('id', id)
+    .single()
+
+  if (error) {
+    console.error('Error fetching customer:', error)
+    throw error
+  }
+  return toCamelCase(data)
+}
+
+export const createCustomer = async (customer) => {
+  const snakeCustomer = toSnakeCase(customer)
+  const { data, error } = await supabase
+    .from('customers')
+    .insert([snakeCustomer])
+    .select()
+    .single()
+
+  if (error) {
+    console.error('Error creating customer:', error)
+    throw error
+  }
+  return toCamelCase(data)
+}
+
+export const updateCustomer = async (id, updates) => {
+  const snakeUpdates = toSnakeCase(updates)
+  const { data, error } = await supabase
+    .from('customers')
+    .update(snakeUpdates)
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error('Error updating customer:', error)
+    throw error
+  }
+  return toCamelCase(data)
+}
+
+// ==================== ORDERS ====================
+
+export const fetchOrders = async (customerId = null) => {
+  let query = supabase
+    .from('orders')
+    .select('*')
+    .order('created_at', { ascending: false })
+  
+  if (customerId) {
+    query = query.eq('customer_id', customerId)
+  }
+  
+  const { data, error } = await query
+
+  if (error) {
+    console.error('Error fetching orders:', error)
+    throw error
+  }
+  return (data || []).map(toCamelCase)
+}
+
+export const fetchCustomerOrders = async (customerId) => {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('customer_id', customerId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('Error fetching customer orders:', error)
+    throw error
+  }
+  return (data || []).map(toCamelCase)
+}
+
+export const createOrder = async (order) => {
+  const snakeOrder = toSnakeCase(order)
+  console.log('Creating order with data:', snakeOrder)
+  
+  const { data, error } = await supabase
+    .from('orders')
+    .insert([snakeOrder])
+    .select()
+    .single()
+
+  if (error) {
+    console.error('Error creating order:', error)
+    console.error('Error details:', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    })
+    throw error
+  }
+  return toCamelCase(data)
+}
+
+export const updateOrder = async (id, updates) => {
+  const snakeUpdates = toSnakeCase(updates)
+  const { data, error } = await supabase
+    .from('orders')
+    .update(snakeUpdates)
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error('Error updating order:', error)
+    throw error
+  }
+  return toCamelCase(data)
 }
 

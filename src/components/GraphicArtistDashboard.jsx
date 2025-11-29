@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import Header from './Header'
 import Sidebar from './Sidebar'
-import { fetchCashAdvanceRecords, fetchTimeRecords, fetchDayOffRecords, createCashAdvanceRecord } from '../lib/supabase'
+import Alert from './Alert'
+import { fetchCashAdvanceRecords, fetchTimeRecords, fetchDayOffRecords, createCashAdvanceRecord, fetchCustomers, fetchCustomerById, createCustomer, updateCustomer, fetchCustomerOrders, createOrder, fetchOrders } from '../lib/supabase'
 import { 
   LayoutDashboard, 
   Plus, 
@@ -40,7 +41,10 @@ import {
   DollarSign,
   AlertCircle,
   Briefcase,
-  ArrowLeft
+  ArrowLeft,
+  Search,
+  X,
+  Calculator
 } from 'lucide-react'
 import './GraphicArtistDashboard.css'
 
@@ -95,11 +99,6 @@ function GraphicArtistDashboard({ user }) {
       icon: Plus
     },
     {
-      id: 'create-pahabol',
-      label: 'Create Pahabol',
-      icon: Clock
-    },
-    {
       id: 'order-tracking',
       label: 'Order Tracking',
       icon: Package
@@ -119,22 +118,37 @@ function GraphicArtistDashboard({ user }) {
     }
   ]
 
+  const customersItems = [
+    {
+      id: 'customer-profile',
+      label: 'Customer Profile',
+      icon: User
+    },
+    {
+      id: 'customer-reports',
+      label: 'Customer Reports',
+      icon: FileText
+    }
+  ]
+
   const renderContent = () => {
     switch (currentView) {
       case 'dashboard':
-        return <DashboardView cashAdvanceBalance={cashAdvanceBalance} />
+        return <DashboardView cashAdvanceBalance={cashAdvanceBalance} user={user} />
       case 'employee-dashboard':
         return <EmployeeDashboardView user={user} />
       case 'create-order':
-        return <CreateOrderView />
-      case 'create-pahabol':
-        return <CreatePahabolView />
+        return <CreateOrderView user={user} onOrderCreated={() => setCurrentView('order-tracking')} />
       case 'order-tracking':
-        return <OrderTrackingView />
+        return <OrderTrackingView user={user} />
       case 'sublimation-orders':
         return <SublimationOrdersView />
       case 'sublimation-listing':
         return <SublimationListingView />
+      case 'customer-profile':
+        return <CustomerProfileView />
+      case 'customer-reports':
+        return <CustomerReportsView />
       default:
         return <DashboardView cashAdvanceBalance={cashAdvanceBalance} />
     }
@@ -147,6 +161,7 @@ function GraphicArtistDashboard({ user }) {
         setIsOpen={setIsSidebarOpen}
         menuItems={menuItems}
         sublimationItems={sublimationItems}
+        customersItems={customersItems}
         currentView={currentView}
         onMenuClick={setCurrentView}
       />
@@ -164,14 +179,106 @@ function GraphicArtistDashboard({ user }) {
 }
 
 // Dashboard View Component
-function DashboardView({ cashAdvanceBalance = 0 }) {
+function DashboardView({ cashAdvanceBalance = 0, user }) {
   const [currentOrdersTab, setCurrentOrdersTab] = useState('payment')
   const [productionStatusTab, setProductionStatusTab] = useState('design')
-  
-  const ordersForPayment = []
-  const ordersPending = []
-  const ordersForDesign = []
-  const ordersForSublimation = []
+  const [ordersForPayment, setOrdersForPayment] = useState([])
+  const [ordersPending, setOrdersPending] = useState([])
+  const [ordersForDesign, setOrdersForDesign] = useState([])
+  const [ordersForSublimation, setOrdersForSublimation] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  // Fetch and filter orders assigned to the logged-in user
+  useEffect(() => {
+    const loadOrders = async () => {
+      if (!user?.employeeName) {
+        setLoading(false)
+        return
+      }
+
+      try {
+        setLoading(true)
+        const allOrders = await fetchOrders()
+        
+        // Filter orders assigned to the logged-in user
+        const assignedOrders = allOrders.filter(order => {
+          const orderData = order.orderData || {}
+          const assignedArtist = orderData.assignedArtist || ''
+          return assignedArtist.toLowerCase() === user.employeeName.toLowerCase()
+        })
+
+        // Categorize orders
+        const forPayment = []
+        const pending = []
+        const forDesign = []
+        const forSublimation = []
+
+        assignedOrders.forEach(order => {
+          const orderData = order.orderData || {}
+          const status = order.status?.toLowerCase() || 'pending'
+          
+          // Calculate quantity based on order type
+          let quantity = '1'
+          if (order.orderType === 'Sublimation' && orderData.cartItems && Array.isArray(orderData.cartItems)) {
+            // For Sublimation, sum all quantities from cart items
+            const totalQty = orderData.cartItems.reduce((sum, item) => {
+              if (item.sizes && Array.isArray(item.sizes)) {
+                return sum + item.sizes.reduce((sizeSum, size) => sizeSum + (parseInt(size.quantity) || 0), 0)
+              }
+              return sum + (parseInt(item.quantity) || 0)
+            }, 0)
+            quantity = totalQty > 0 ? totalQty.toString() : '1'
+          } else {
+            quantity = orderData.quantity || '1'
+          }
+
+          // Transform order to match table format
+          const transformedOrder = {
+            id: order.id,
+            customer: order.customerName || 'N/A',
+            product: order.orderType || 'N/A',
+            quantity: quantity,
+            amount: parseFloat(order.totalAmount || 0),
+            date: order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
+            progress: typeof orderData.progress === 'number' ? orderData.progress : (parseInt(orderData.progress) || 0),
+            deadline: orderData.preferredDeliveryDate || orderData.pickupDate || orderData.eventDate || 'N/A',
+            originalOrder: order // Keep original order for reference
+          }
+          
+          // Orders for payment (status: pending, balance > 0)
+          if (status === 'pending' && parseFloat(order.balance || 0) > 0) {
+            forPayment.push(transformedOrder)
+          }
+          
+          // Pending orders (status: pending, balance = 0 or no balance)
+          if (status === 'pending' && parseFloat(order.balance || 0) === 0) {
+            pending.push(transformedOrder)
+          }
+          
+          // Orders in design process (status: in-progress or in-design)
+          if (status === 'in-progress' || status === 'in-design' || status === 'design') {
+            forDesign.push(transformedOrder)
+          }
+          
+          // Orders in sublimation (status: in-sublimation or sublimation)
+          if (status === 'in-sublimation' || status === 'sublimation') {
+            forSublimation.push(transformedOrder)
+          }
+        })
+
+        setOrdersForPayment(forPayment)
+        setOrdersPending(pending)
+        setOrdersForDesign(forDesign)
+        setOrdersForSublimation(forSublimation)
+      } catch (error) {
+        console.error('Error loading orders:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadOrders()
+  }, [user?.employeeName])
 
   // Format peso amount
   const formatPeso = (amount) => {
@@ -344,7 +451,19 @@ function DashboardView({ cashAdvanceBalance = 0 }) {
                 </tr>
               </thead>
               <tbody>
-                {getCurrentOrders().length === 0 ? (
+                {loading ? (
+                  <tr>
+                    <td colSpan="7" className="empty-table remastered-empty">
+                      <div className="empty-state">
+                        <div className="empty-icon-wrapper">
+                          <Package size={48} />
+                        </div>
+                        <h3>Loading orders...</h3>
+                        <p>Please wait while we fetch your assigned orders</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : getCurrentOrders().length === 0 ? (
                   <tr>
                     <td colSpan="7" className="empty-table remastered-empty">
                       <div className="empty-state">
@@ -487,7 +606,19 @@ function DashboardView({ cashAdvanceBalance = 0 }) {
                 </tr>
               </thead>
               <tbody>
-                {getProductionOrders().length === 0 ? (
+                {loading ? (
+                  <tr>
+                    <td colSpan="7" className="empty-table remastered-empty">
+                      <div className="empty-state">
+                        <div className="empty-icon-wrapper">
+                          {productionStatusTab === 'design' ? <Palette size={48} /> : <Image size={48} />}
+                        </div>
+                        <h3>Loading orders...</h3>
+                        <p>Please wait while we fetch your assigned orders</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : getProductionOrders().length === 0 ? (
                   <tr>
                     <td colSpan="7" className="empty-table remastered-empty">
                       <div className="empty-state">
@@ -769,162 +900,341 @@ function EmployeeDashboardView({ user }) {
                 const cashAdvanceBalance = getCashAdvanceBalance(employee.id, employee.name)
                 const upcomingDayOffs = getUpcomingDayOffs(employee.id, employee.name)
                 
+                // Calculate additional stats
+                const allPayrollRecords = timeRecords.filter(r => r.employeeId === employee.id)
+                const totalPayrollCount = allPayrollRecords.length
+                const totalEarnings = allPayrollRecords.reduce((sum, r) => sum + (Number(r.netPay) || 0), 0)
+                const recentPayrolls = allPayrollRecords.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 3)
+                
+                // Calculate attendance stats
+                const thisMonthRecords = allPayrollRecords.filter(r => {
+                  const recordDate = new Date(r.createdAt)
+                  const now = new Date()
+                  return recordDate.getMonth() === now.getMonth() && recordDate.getFullYear() === now.getFullYear()
+                })
+                
                 return (
                   <div key={employee.id} className="employee-dashboard-wrapper">
-                    {/* Employee Profile Card */}
-                    <div className="employee-profile-card">
-                      <div className="employee-profile-header">
-                        <div className="employee-avatar-large">
-                          <User size={32} />
+                    {/* Enhanced Profile Hero Section */}
+                    <div className="employee-profile-hero">
+                      <div className="profile-hero-background"></div>
+                      <div className="profile-hero-content">
+                        <div className="profile-avatar-section">
+                          <div className="employee-avatar-hero">
+                            <User size={40} />
+                          </div>
+                          <div className="profile-status-indicator"></div>
                         </div>
-                        <div className="employee-profile-info">
-                          <h2>{employee.name}</h2>
-                          <div className="employee-profile-meta">
-                            <span className="employee-id">ID: #{employee.id}</span>
-                            <span className={`shift-badge ${employee.shiftType === 'first' ? 'first-shift' : 'second-shift'}`}>
+                        <div className="profile-hero-info">
+                          <h1 className="profile-hero-name">{employee.name}</h1>
+                          <div className="profile-hero-badges">
+                            <span className="hero-badge employee-id-badge">
+                              <Hash size={14} />
+                              ID: #{employee.id}
+                            </span>
+                            <span className={`hero-badge shift-badge-hero ${employee.shiftType === 'first' ? 'first-shift' : 'second-shift'}`}>
+                              <Clock size={14} />
                               {employee.shiftType === 'first' ? 'First Shift' : 'Second Shift'}
                             </span>
-                          </div>
-                          <div className="employee-rate-info">
-                            <span className="rate-display-large">{formatPeso(employee.ratePer9Hours || 0)}</span>
-                            <span className="rate-label">Rate per 9 hours</span>
-                          </div>
-                        </div>
-                      </div>
-                      <button
-                        className="btn-view-dtr"
-                        onClick={() => fetchDTRRecords(employee.id, employee.name)}
-                      >
-                        <FileText size={18} />
-                        <span>View DTR Records</span>
-                      </button>
-                    </div>
-
-                    {/* 4 Main Cards Grid */}
-                    <div className="employee-cards-grid">
-                      {/* Card 1: Latest Payroll */}
-                      <div className="employee-main-card">
-                        <div className="employee-main-card-header">
-                          <div className="card-icon payroll-icon">
-                            <DollarSign size={24} />
-                          </div>
-                          <h3>Latest Payroll</h3>
-                        </div>
-                        <div className="employee-main-card-body">
-                          {latestPayroll ? (
-                            <>
-                              <div className="card-stat-large">
-                                <span className="stat-label">Net Pay</span>
-                                <span className="stat-value-large highlight">{formatPeso(latestPayroll.netPay || 0)}</span>
-                              </div>
-                              <div className="card-details">
-                                <div className="detail-item">
-                                  <span className="detail-label">Period:</span>
-                                  <span className="detail-value">{latestPayroll.month} {latestPayroll.year} ({latestPayroll.payPeriod})</span>
-                                </div>
-                                <div className="detail-item">
-                                  <span className="detail-label">Gross Pay:</span>
-                                  <span className="detail-value">{formatPeso(latestPayroll.grossPay || 0)}</span>
-                                </div>
-                                <div className="detail-item">
-                                  <span className="detail-label">Date:</span>
-                                  <span className="detail-value">{formatDate(latestPayroll.createdAt)}</span>
-                                </div>
-                              </div>
-                            </>
-                          ) : (
-                            <div className="no-data-card">
-                              <span className="no-data">No payroll records</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Card 2: Cash Advance */}
-                      <div className="employee-main-card">
-                        <div className="employee-main-card-header">
-                          <div className="card-icon cash-advance-icon">
-                            <Wallet size={24} />
-                          </div>
-                          <h3>Cash Advance</h3>
-                        </div>
-                        <div className="employee-main-card-body">
-                          <div className="card-stat-large">
-                            <span className="stat-label">Current Balance</span>
-                            <span className={`stat-value-large ${cashAdvanceBalance > 0 ? 'warning' : 'success'}`}>
-                              {formatPeso(cashAdvanceBalance)}
+                            <span className="hero-badge rate-badge-hero">
+                              <DollarSign size={14} />
+                              {formatPeso(employee.ratePer9Hours || 0)}/9hrs
                             </span>
                           </div>
+                        </div>
+                        <div className="profile-hero-actions">
                           <button
-                            className="btn-request-cash-advance-main"
+                            className="btn-hero-action primary"
+                            onClick={() => fetchDTRRecords(employee.id, employee.name)}
+                          >
+                            <FileText size={18} />
+                            <span>DTR Records</span>
+                          </button>
+                          <button
+                            className="btn-hero-action"
                             onClick={() => {
                               setSelectedEmployee(employee)
                               setShowCashAdvanceModal(true)
                             }}
                           >
-                            <Plus size={16} />
-                            <span>Request Cash Advance</span>
+                            <Plus size={18} />
+                            <span>Cash Advance</span>
                           </button>
                         </div>
                       </div>
+                    </div>
 
-                      {/* Card 3: Day Offs */}
-                      <div className="employee-main-card">
-                        <div className="employee-main-card-header">
-                          <div className="card-icon day-off-icon">
-                            <Calendar size={24} />
-                          </div>
-                          <h3>Upcoming Day Offs</h3>
+                    {/* Quick Stats Row */}
+                    <div className="quick-stats-row">
+                      <div className="quick-stat-card">
+                        <div className="quick-stat-icon payroll">
+                          <DollarSign size={20} />
                         </div>
-                        <div className="employee-main-card-body">
-                          {upcomingDayOffs.length > 0 ? (
-                            <div className="day-offs-list-main">
-                              {upcomingDayOffs.slice(0, 5).map((dayOff, idx) => (
-                                <div key={idx} className="day-off-item-main">
-                                  <CalendarCheck size={16} />
-                                  <div className="day-off-info">
-                                    <span className="day-off-date">{formatDate(dayOff.date)}</span>
-                                    {dayOff.isQualified && (
-                                      <span className="qualified-badge-main">Qualified</span>
-                                    )}
+                        <div className="quick-stat-content">
+                          <span className="quick-stat-label">Total Earnings</span>
+                          <span className="quick-stat-value">{formatPeso(totalEarnings)}</span>
+                        </div>
+                      </div>
+                      <div className="quick-stat-card">
+                        <div className="quick-stat-icon payroll-count">
+                          <Briefcase size={20} />
+                        </div>
+                        <div className="quick-stat-content">
+                          <span className="quick-stat-label">Payroll Records</span>
+                          <span className="quick-stat-value">{totalPayrollCount}</span>
+                        </div>
+                      </div>
+                      <div className="quick-stat-card">
+                        <div className="quick-stat-icon cash-advance">
+                          <Wallet size={20} />
+                        </div>
+                        <div className="quick-stat-content">
+                          <span className="quick-stat-label">Cash Advance</span>
+                          <span className={`quick-stat-value ${cashAdvanceBalance > 0 ? 'warning' : 'success'}`}>
+                            {formatPeso(cashAdvanceBalance)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="quick-stat-card">
+                        <div className="quick-stat-icon day-offs">
+                          <Calendar size={20} />
+                        </div>
+                        <div className="quick-stat-content">
+                          <span className="quick-stat-label">Upcoming Days Off</span>
+                          <span className="quick-stat-value">{upcomingDayOffs.length}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Main Content Grid */}
+                    <div className="employee-content-grid">
+                      {/* Left Column */}
+                      <div className="employee-left-column">
+                        {/* Latest Payroll Card */}
+                        <div className="employee-feature-card payroll-card">
+                          <div className="feature-card-header">
+                            <div className="feature-card-icon payroll">
+                              <DollarSign size={24} />
+                            </div>
+                            <div>
+                              <h3>Latest Payroll</h3>
+                              <p>Your most recent payment details</p>
+                            </div>
+                          </div>
+                          <div className="feature-card-body">
+                            {latestPayroll ? (
+                              <>
+                                <div className="payroll-amount-display">
+                                  <span className="payroll-label">Net Pay</span>
+                                  <span className="payroll-amount">{formatPeso(latestPayroll.netPay || 0)}</span>
+                                </div>
+                                <div className="payroll-details-grid">
+                                  <div className="payroll-detail-item">
+                                    <span className="detail-label">Period</span>
+                                    <span className="detail-value">{latestPayroll.month} {latestPayroll.year}</span>
+                                  </div>
+                                  <div className="payroll-detail-item">
+                                    <span className="detail-label">Pay Period</span>
+                                    <span className="detail-value">{latestPayroll.payPeriod || 'N/A'}</span>
+                                  </div>
+                                  <div className="payroll-detail-item">
+                                    <span className="detail-label">Gross Pay</span>
+                                    <span className="detail-value">{formatPeso(latestPayroll.grossPay || 0)}</span>
+                                  </div>
+                                  <div className="payroll-detail-item">
+                                    <span className="detail-label">Date</span>
+                                    <span className="detail-value">{formatDate(latestPayroll.createdAt)}</span>
                                   </div>
                                 </div>
-                              ))}
-                              {upcomingDayOffs.length > 5 && (
-                                <div className="more-day-offs-main">+{upcomingDayOffs.length - 5} more</div>
-                              )}
+                              </>
+                            ) : (
+                              <div className="empty-state-feature">
+                                <DollarSign size={48} />
+                                <p>No payroll records available</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Recent Payroll History */}
+                        {recentPayrolls.length > 0 && (
+                          <div className="employee-feature-card history-card">
+                            <div className="feature-card-header">
+                              <div className="feature-card-icon history">
+                                <Clock size={24} />
+                              </div>
+                              <div>
+                                <h3>Recent Payroll History</h3>
+                                <p>Last 3 payroll records</p>
+                              </div>
                             </div>
-                          ) : (
-                            <div className="no-data-card">
-                              <span className="no-data">No upcoming day offs</span>
+                            <div className="feature-card-body">
+                              <div className="payroll-history-list">
+                                {recentPayrolls.map((payroll, idx) => (
+                                  <div key={idx} className="payroll-history-item">
+                                    <div className="history-item-date">
+                                      <Calendar size={16} />
+                                      <span>{formatDate(payroll.createdAt)}</span>
+                                    </div>
+                                    <div className="history-item-details">
+                                      <span className="history-period">{payroll.month} {payroll.year} ({payroll.payPeriod})</span>
+                                      <span className="history-amount">{formatPeso(payroll.netPay || 0)}</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          )}
+                          </div>
+                        )}
+
+                        {/* Cash Advance Card */}
+                        <div className="employee-feature-card cash-advance-card">
+                          <div className="feature-card-header">
+                            <div className="feature-card-icon cash-advance">
+                              <Wallet size={24} />
+                            </div>
+                            <div>
+                              <h3>Cash Advance</h3>
+                              <p>Manage your advance requests</p>
+                            </div>
+                          </div>
+                          <div className="feature-card-body">
+                            <div className="cash-advance-display">
+                              <span className="cash-advance-label">Current Balance</span>
+                              <span className={`cash-advance-amount ${cashAdvanceBalance > 0 ? 'warning' : 'success'}`}>
+                                {formatPeso(cashAdvanceBalance)}
+                              </span>
+                            </div>
+                            <button
+                              className="btn-feature-action"
+                              onClick={() => {
+                                setSelectedEmployee(employee)
+                                setShowCashAdvanceModal(true)
+                              }}
+                            >
+                              <Plus size={18} />
+                              <span>Request Cash Advance</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
 
-                      {/* Card 4: Access Information */}
-                      <div className="employee-main-card">
-                        <div className="employee-main-card-header">
-                          <div className="card-icon access-icon">
-                            <Hash size={24} />
-                          </div>
-                          <h3>Access Information</h3>
-                        </div>
-                        <div className="employee-main-card-body">
-                          <div className="access-info-main">
-                            <div className="access-item">
-                              <div className="access-item-header">
-                                <Package2 size={16} />
-                                <span>Access Code</span>
-                              </div>
-                              <span className="access-value">{employee.accessCode || 'N/A'}</span>
+                      {/* Right Column */}
+                      <div className="employee-right-column">
+                        {/* Upcoming Day Offs */}
+                        <div className="employee-feature-card day-offs-card">
+                          <div className="feature-card-header">
+                            <div className="feature-card-icon day-offs">
+                              <Calendar size={24} />
                             </div>
-                            <div className="access-item">
-                              <div className="access-item-header">
-                                <Package2 size={16} />
-                                <span>Barcode</span>
+                            <div>
+                              <h3>Upcoming Day Offs</h3>
+                              <p>{upcomingDayOffs.length} scheduled days off</p>
+                            </div>
+                          </div>
+                          <div className="feature-card-body">
+                            {upcomingDayOffs.length > 0 ? (
+                              <div className="day-offs-list-enhanced">
+                                {upcomingDayOffs.slice(0, 6).map((dayOff, idx) => (
+                                  <div key={idx} className="day-off-item-enhanced">
+                                    <div className="day-off-icon-wrapper">
+                                      <CalendarCheck size={18} />
+                                    </div>
+                                    <div className="day-off-content">
+                                      <span className="day-off-date-enhanced">{formatDate(dayOff.date)}</span>
+                                      {dayOff.isQualified && (
+                                        <span className="qualified-badge-enhanced">Qualified</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                                {upcomingDayOffs.length > 6 && (
+                                  <div className="more-day-offs-enhanced">
+                                    <span>+{upcomingDayOffs.length - 6} more days off</span>
+                                  </div>
+                                )}
                               </div>
-                              <span className="access-value">{employee.barcode || 'N/A'}</span>
+                            ) : (
+                              <div className="empty-state-feature">
+                                <Calendar size={48} />
+                                <p>No upcoming day offs scheduled</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Access Information */}
+                        <div className="employee-feature-card access-card">
+                          <div className="feature-card-header">
+                            <div className="feature-card-icon access">
+                              <Hash size={24} />
+                            </div>
+                            <div>
+                              <h3>Access Information</h3>
+                              <p>Your access codes and credentials</p>
+                            </div>
+                          </div>
+                          <div className="feature-card-body">
+                            <div className="access-info-enhanced">
+                              <div className="access-item-enhanced">
+                                <div className="access-item-header-enhanced">
+                                  <Package2 size={18} />
+                                  <span>Access Code</span>
+                                </div>
+                                <div className="access-value-enhanced">
+                                  <code>{employee.accessCode || 'N/A'}</code>
+                                  <button className="btn-copy-code" title="Copy to clipboard">
+                                    <Hash size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="access-item-enhanced">
+                                <div className="access-item-header-enhanced">
+                                  <Package2 size={18} />
+                                  <span>Barcode</span>
+                                </div>
+                                <div className="access-value-enhanced">
+                                  <code>{employee.barcode || 'N/A'}</code>
+                                  <button className="btn-copy-code" title="Copy to clipboard">
+                                    <Hash size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Employee Information */}
+                        <div className="employee-feature-card info-card">
+                          <div className="feature-card-header">
+                            <div className="feature-card-icon info">
+                              <User size={24} />
+                            </div>
+                            <div>
+                              <h3>Employee Information</h3>
+                              <p>Your profile details</p>
+                            </div>
+                          </div>
+                          <div className="feature-card-body">
+                            <div className="employee-info-list">
+                              <div className="info-list-item">
+                                <span className="info-item-label">Employee ID</span>
+                                <span className="info-item-value">#{employee.id}</span>
+                              </div>
+                              <div className="info-list-item">
+                                <span className="info-item-label">Shift Type</span>
+                                <span className={`info-item-value badge ${employee.shiftType === 'first' ? 'first-shift' : 'second-shift'}`}>
+                                  {employee.shiftType === 'first' ? 'First Shift' : 'Second Shift'}
+                                </span>
+                              </div>
+                              <div className="info-list-item">
+                                <span className="info-item-label">Rate per 9 Hours</span>
+                                <span className="info-item-value">{formatPeso(employee.ratePer9Hours || 0)}</span>
+                              </div>
+                              <div className="info-list-item">
+                                <span className="info-item-label">Total Payrolls</span>
+                                <span className="info-item-value">{totalPayrollCount}</span>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1071,7 +1381,7 @@ function EmployeeDashboardView({ user }) {
 }
 
 // Create Order View
-function CreateOrderView() {
+function CreateOrderView({ user, onOrderCreated }) {
   const [step, setStep] = useState(1)
   const [orderType, setOrderType] = useState('')
   const [repairData, setRepairData] = useState({
@@ -1105,7 +1415,10 @@ function CreateOrderView() {
     quantity: '1',
     designNotes: '',
     paymentMethod: 'Cash',
-    downPayment: ''
+    downPayment: '',
+    isPahabol: false,
+    assignedArtist: '',
+    rushOrder: false
   })
   const [sublimationData, setSublimationData] = useState({
     customerName: '',
@@ -1131,9 +1444,13 @@ function CreateOrderView() {
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [artistSearch, setArtistSearch] = useState('')
   const [showArtistDropdown, setShowArtistDropdown] = useState(false)
+  const [tarpaulinArtistSearch, setTarpaulinArtistSearch] = useState('')
+  const [showTarpaulinArtistDropdown, setShowTarpaulinArtistDropdown] = useState(false)
+  const [employees, setEmployees] = useState([])
   const [cartItems, setCartItems] = useState([])
   const [cartIdCounter, setCartIdCounter] = useState(1)
   const [showProductSelection, setShowProductSelection] = useState(false)
+  const [selectedProductType, setSelectedProductType] = useState(null)
   const [productSelectionData, setProductSelectionData] = useState({
     productType: '',
     sizes: {
@@ -1143,25 +1460,95 @@ function CreateOrderView() {
       L: 0,
       XL: 0,
       '2XL': 0,
-      '3XL': 0
+      '3XL': 0,
+      '4XL': 0
     },
     customSizes: []
   })
-  
-  // Mock artist data with availability status
-  const availableArtists = [
-    { id: 1, name: 'Artist 1', status: 'Available', workload: 3 },
-    { id: 2, name: 'Artist 2', status: 'Available', workload: 5 },
-    { id: 3, name: 'Artist 3', status: 'Not Available', workload: 8 },
-    { id: 4, name: 'Artist 4', status: 'Available', workload: 2 },
-    { id: 5, name: 'John Martinez', status: 'Available', workload: 4 },
-    { id: 6, name: 'Maria Santos', status: 'Not Available', workload: 7 },
-    { id: 7, name: 'Carlos Rivera', status: 'Available', workload: 1 },
+
+  // Predefined product types with prices
+  const productTypes = [
+    { id: 'tshirt', name: 'T-Shirt', icon: '👕', price: 350 },
+    { id: 'tshirt-vneck', name: 'T-Shirt V-Neck', icon: '👕', price: 400 },
+    { id: 'longsleeve', name: 'Longsleeve', icon: '👔', price: 450 },
+    { id: 'longsleeve-hoodie', name: 'Longsleeve Hoodie', icon: '🧶', price: 500 },
+    { id: 'polo-shirt', name: 'Polo Shirt', icon: '👕', price: 450 },
+    { id: 'polo-longsleeve', name: 'Polo Longsleeve', icon: '👔', price: 500 },
+    { id: 'esport-shirt', name: 'Esport Shirt', icon: '🎮', price: 475 },
+    { id: 'esport-longsleeve', name: 'Esport Longsleeve', icon: '🎮', price: 525 },
+    { id: 'chinese-collar', name: 'Chinese Collar', icon: '👔', price: 500 },
+    { id: 'jersey-up', name: 'Jersey Up', icon: '🏀', price: 450 },
+    { id: 'jersey-shorts', name: 'Jersey Shorts', icon: '🩳', price: 450 },
+    { id: 'jogging-pants', name: 'Jogging Pants', icon: '👖', price: 600 },
+    { id: 'jacket-hoodie', name: 'Jacket with Hoodie', icon: '🧥', price: 900 },
+    { id: 'jacket-turtleneck', name: 'Jacket Turtle Neck', icon: '🧥', price: 950 },
+    { id: 'jacket-bomber', name: 'Jacket Bomber Neck', icon: '🧥', price: 850 },
+    { id: 'jersey-set', name: 'Jersey Set', icon: '🏀', price: 800 }
   ]
   
-  const filteredArtists = availableArtists.filter(artist =>
-    artist.name.toLowerCase().includes(artistSearch.toLowerCase())
-  )
+  // Customer search and management
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false)
+  const [customers, setCustomers] = useState([])
+  const [selectedCustomer, setSelectedCustomer] = useState(null)
+  const [customerOrders, setCustomerOrders] = useState([])
+  const [isNewCustomer, setIsNewCustomer] = useState(true)
+  
+  // Alert state
+  const [alert, setAlert] = useState({
+    isOpen: false,
+    type: 'success',
+    title: '',
+    message: ''
+  })
+  
+  const showAlert = (type, title, message) => {
+    setAlert({
+      isOpen: true,
+      type,
+      title,
+      message
+    })
+  }
+  
+  const closeAlert = () => {
+    setAlert({
+      isOpen: false,
+      type: 'success',
+      title: '',
+      message: ''
+    })
+  }
+  
+  // Load employees from database
+  useEffect(() => {
+    const loadEmployees = async () => {
+      try {
+        const { fetchEmployees } = await import('../lib/supabase')
+        const employeeList = await fetchEmployees()
+        console.log('Loaded employees:', employeeList)
+        setEmployees(employeeList || [])
+      } catch (error) {
+        console.error('Error loading employees:', error)
+        setEmployees([])
+      }
+    }
+    loadEmployees()
+  }, [])
+  
+  // Filter artists based on search (for Sublimation)
+  const filteredArtists = artistSearch.trim() === ''
+    ? employees
+    : employees.filter(employee =>
+        employee.name.toLowerCase().includes(artistSearch.toLowerCase())
+      )
+  
+  // Filter artists based on search (for Tarpaulin)
+  const filteredTarpaulinArtists = tarpaulinArtistSearch.trim() === ''
+    ? employees
+    : employees.filter(employee =>
+        employee.name.toLowerCase().includes(tarpaulinArtistSearch.toLowerCase())
+      )
   
   const handleArtistSelect = (artistName) => {
     handleSublimationInputChange('assignedArtist', artistName)
@@ -1169,10 +1556,66 @@ function CreateOrderView() {
     setShowArtistDropdown(false)
   }
   
-  const getArtistStatus = (artistName) => {
-    const artist = availableArtists.find(a => a.name === artistName)
-    return artist ? artist.status : 'Unknown'
+  const handleTarpaulinArtistSelect = (artistName) => {
+    setTarpaulinData(prev => ({
+      ...prev,
+      assignedArtist: artistName
+    }))
+    setTarpaulinArtistSearch(artistName)
+    setShowTarpaulinArtistDropdown(false)
   }
+  
+  const getArtistStatus = (artistName) => {
+    // For now, assume all employees are available
+    // You can add availability logic later based on workload or other criteria
+    return 'Available'
+  }
+
+  // Get selected employee data for Tarpaulin or Sublimation
+  const getSelectedTarpaulinEmployee = () => {
+    const assignedArtist = orderType === 'Tarpaulin' 
+      ? tarpaulinData.assignedArtist 
+      : orderType === 'Sublimation'
+      ? sublimationData.assignedArtist
+      : null
+    if (!assignedArtist) return null
+    return employees.find(emp => emp.name === assignedArtist)
+  }
+
+  // Count orders assigned to an employee
+  const getEmployeeOrderCount = async (employeeName) => {
+    if (!employeeName) return 0
+    try {
+      const allOrders = await fetchOrders()
+      return allOrders.filter(order => {
+        const orderData = order.orderData || {}
+        return orderData.assignedArtist === employeeName
+      }).length
+    } catch (error) {
+      console.error('Error counting employee orders:', error)
+      return 0
+    }
+  }
+
+  const [selectedEmployeeOrderCount, setSelectedEmployeeOrderCount] = useState(0)
+
+  // Update order count when artist is selected
+  useEffect(() => {
+    const updateOrderCount = async () => {
+      const assignedArtist = orderType === 'Tarpaulin' 
+        ? tarpaulinData.assignedArtist 
+        : orderType === 'Sublimation'
+        ? sublimationData.assignedArtist
+        : null
+      if (assignedArtist) {
+        const count = await getEmployeeOrderCount(assignedArtist)
+        setSelectedEmployeeOrderCount(count)
+      } else {
+        setSelectedEmployeeOrderCount(0)
+      }
+    }
+    updateOrderCount()
+  }, [tarpaulinData.assignedArtist, sublimationData.assignedArtist, orderType])
 
   const handleAddToCart = () => {
     if (!sublimationData.productType || !sublimationData.size || !sublimationData.quantity) {
@@ -1201,6 +1644,7 @@ function CreateOrderView() {
   }
 
   const handleClearCart = () => {
+    if (cartItems.length === 0) return
     if (window.confirm('Are you sure you want to clear all items from the cart?')) {
       setCartItems([])
       setCartIdCounter(1)
@@ -1213,10 +1657,12 @@ function CreateOrderView() {
 
   const handleShowProductSelection = () => {
     setShowProductSelection(true)
+    setSelectedProductType(null)
   }
 
   const handleCancelProductSelection = () => {
     setShowProductSelection(false)
+    setSelectedProductType(null)
     setProductSelectionData({
       productType: '',
       sizes: {
@@ -1226,10 +1672,38 @@ function CreateOrderView() {
         L: 0,
         XL: 0,
         '2XL': 0,
-        '3XL': 0
+        '3XL': 0,
+        '4XL': 0
       },
       customSizes: []
     })
+  }
+
+  const handleSelectProductType = (productType) => {
+    setSelectedProductType(productType)
+    setProductSelectionData(prev => ({
+      ...prev,
+      productType: productType.name
+    }))
+  }
+
+  const handleBackToProductSelection = () => {
+    setSelectedProductType(null)
+    setProductSelectionData(prev => ({
+      ...prev,
+      productType: '',
+      sizes: {
+        XS: 0,
+        S: 0,
+        M: 0,
+        L: 0,
+        XL: 0,
+        '2XL': 0,
+        '3XL': 0,
+        '4XL': 0
+      },
+      customSizes: []
+    }))
   }
 
   const handleProductTypeChange = (value) => {
@@ -1268,7 +1742,20 @@ function CreateOrderView() {
 
   const handleAddProductToCart = () => {
     if (!productSelectionData.productType) {
-      alert('Please enter product type')
+      showAlert('error', 'Missing Product Type', 'Please select a product type')
+      return
+    }
+
+    // Get the selected product type to get the price
+    const selectedProduct = productTypes.find(p => p.name === productSelectionData.productType)
+    const productPrice = selectedProduct ? selectedProduct.price : 0
+
+    // Check if at least one size has quantity > 0
+    const hasStandardSizes = Object.values(productSelectionData.sizes).some(qty => qty > 0)
+    const hasCustomSizes = productSelectionData.customSizes.some(cs => cs.size && cs.quantity > 0)
+
+    if (!hasStandardSizes && !hasCustomSizes) {
+      showAlert('error', 'Missing Quantities', 'Please enter at least one quantity for any size')
       return
     }
 
@@ -1280,6 +1767,8 @@ function CreateOrderView() {
           productType: productSelectionData.productType,
           size: size,
           quantity: quantity,
+          price: productPrice,
+          totalPrice: productPrice * quantity,
           assignedArtist: sublimationData.assignedArtist || 'Not Assigned'
         }
         setCartItems(prev => [...prev, newItem])
@@ -1295,6 +1784,8 @@ function CreateOrderView() {
           productType: productSelectionData.productType,
           size: size,
           quantity: quantity,
+          price: productPrice,
+          totalPrice: productPrice * quantity,
           assignedArtist: sublimationData.assignedArtist || 'Not Assigned'
         }
         setCartItems(prev => [...prev, newItem])
@@ -1383,6 +1874,74 @@ function CreateOrderView() {
     setSublimationData(prev => ({ ...prev, [field]: value }))
   }
 
+  // Customer search and selection handlers
+  const handleCustomerSearch = async (searchTerm) => {
+    if (!searchTerm || searchTerm.length < 2) {
+      setCustomers([])
+      return
+    }
+    
+    try {
+      const results = await fetchCustomers(searchTerm)
+      setCustomers(results)
+    } catch (error) {
+      console.error('Error searching customers:', error)
+      setCustomers([])
+    }
+  }
+
+  const handleCustomerSelect = async (customer) => {
+    setSelectedCustomer(customer)
+    setIsNewCustomer(false)
+    setShowCustomerDropdown(false)
+    setCustomerSearch('')
+    
+    // Populate form with customer data based on order type
+    if (orderType === 'Tarpaulin') {
+      setTarpaulinData(prev => ({
+        ...prev,
+        customerName: customer.name,
+        contactNumber: customer.contactNumber || '',
+        email: customer.email || '',
+        address: customer.address || '',
+        businessName: customer.businessName || ''
+      }))
+    } else if (orderType === 'Sublimation') {
+      setSublimationData(prev => ({
+        ...prev,
+        customerName: customer.name,
+        contactNumber: customer.contactNumber || '',
+        email: customer.email || '',
+        address: customer.address || '',
+        businessName: customer.businessName || ''
+      }))
+    }
+    
+    // Fetch customer orders
+    try {
+      const orders = await fetchCustomerOrders(customer.id)
+      setCustomerOrders(orders)
+    } catch (error) {
+      console.error('Error fetching customer orders:', error)
+    }
+  }
+
+  // Load customers on mount
+  useEffect(() => {
+    const loadCustomers = async () => {
+      try {
+        const allCustomers = await fetchCustomers('')
+        // Only show if there are customers
+        if (allCustomers.length > 0) {
+          // Optionally pre-populate if needed
+        }
+      } catch (error) {
+        console.error('Error loading customers:', error)
+      }
+    }
+    loadCustomers()
+  }, [])
+
   const handleProblemToggle = (problem) => {
     setRepairData(prev => ({
       ...prev,
@@ -1393,20 +1952,1309 @@ function CreateOrderView() {
   }
 
   const handleNextStep = () => {
-    const maxStep = orderType === 'Tarpaulin' || orderType === 'Sublimation' ? 4 : 3
+    const maxStep = orderType === 'Tarpaulin' ? 4 : orderType === 'Sublimation' ? 5 : 3
     if (step < maxStep) {
       setStep(step + 1)
     }
   }
 
-  const handleSubmitOrder = () => {
-    // Submit order logic here
-    console.log('Order submitted:', { orderType, repairData })
+  const handleSubmitOrder = async () => {
+    try {
+      if (orderType === 'Tarpaulin') {
+        // Validate required fields
+        if (!tarpaulinData.customerName || !tarpaulinData.contactNumber) {
+          showAlert('error', 'Missing Information', 'Please fill in all required customer information')
+          return
+        }
+
+        let customerId = null
+
+        // Handle customer - create new or use existing
+        if (isNewCustomer && selectedCustomer === null) {
+          // Create new customer
+          const newCustomer = await createCustomer({
+            name: tarpaulinData.customerName,
+            contactNumber: tarpaulinData.contactNumber,
+            email: tarpaulinData.email || null,
+            address: tarpaulinData.address || null,
+            businessName: tarpaulinData.businessName || null
+          })
+          customerId = newCustomer.id
+        } else if (selectedCustomer) {
+          // Use existing customer
+          customerId = selectedCustomer.id
+          
+          // Update customer info if changed
+          if (tarpaulinData.email || tarpaulinData.address || tarpaulinData.businessName) {
+            await updateCustomer(selectedCustomer.id, {
+              email: tarpaulinData.email || selectedCustomer.email || null,
+              address: tarpaulinData.address || selectedCustomer.address || null,
+              businessName: tarpaulinData.businessName || selectedCustomer.businessName || null
+            })
+          }
+        }
+
+        // Calculate order amounts
+        const width = parseFloat(tarpaulinData.width) || 0
+        const height = parseFloat(tarpaulinData.height) || 0
+        const quantity = parseFloat(tarpaulinData.quantity) || 1
+        const pricePerSqft = 12 // Price per square foot
+        const area = width * height
+        const totalAmount = area * quantity * pricePerSqft
+        const downPayment = parseFloat(tarpaulinData.downPayment || 0) || 0
+        const amountPaid = downPayment
+        const balance = totalAmount - downPayment
+
+        // Prepare order data object
+        const orderData = {
+          customerName: tarpaulinData.customerName.trim(),
+          customerContact: tarpaulinData.contactNumber.trim(),
+          orderType: 'Tarpaulin',
+          status: 'pending',
+          totalAmount: totalAmount,
+          amountPaid: amountPaid,
+          balance: balance,
+          isPahabol: tarpaulinData.isPahabol === true,
+          rushOrder: tarpaulinData.rushOrder === true,
+          receivedBy: user?.employeeName || 'Unknown',
+          orderData: {
+            ...tarpaulinData,
+            // Include all tarpaulin data in orderData JSONB field
+          }
+        }
+
+        // Only include customerId if it exists (not null)
+        if (customerId !== null && customerId !== undefined) {
+          orderData.customerId = customerId
+        }
+
+        const createdOrder = await createOrder(orderData)
+
+        // Auto-print to xprinter
+        printTarpaulinReceipt(createdOrder, tarpaulinData)
+
+        // Show success message
+        showAlert('success', 'Order Created', 'Tarpaulin order created successfully!')
+
+        // Redirect to order tracking after a short delay
+        setTimeout(() => {
+          if (onOrderCreated) {
+            onOrderCreated()
+          }
+        }, 2000)
+      } else if (orderType === 'Sublimation') {
+        // Validate required fields
+        if (!sublimationData.customerName || !sublimationData.contactNumber) {
+          showAlert('error', 'Missing Information', 'Please fill in all required customer information')
+          return
+        }
+
+        // Validate cart items
+        if (cartItems.length === 0) {
+          showAlert('error', 'Missing Products', 'Please add at least one product to the cart')
+          return
+        }
+
+        let customerId = null
+
+        // Handle customer - create new or use existing
+        if (isNewCustomer && selectedCustomer === null) {
+          // Create new customer
+          const newCustomer = await createCustomer({
+            name: sublimationData.customerName,
+            contactNumber: sublimationData.contactNumber,
+            email: sublimationData.email || null,
+            address: sublimationData.address || null,
+            businessName: sublimationData.businessName || null
+          })
+          customerId = newCustomer.id
+        } else if (selectedCustomer) {
+          // Use existing customer
+          customerId = selectedCustomer.id
+          
+          // Update customer info if changed
+          if (sublimationData.email || sublimationData.address || sublimationData.businessName) {
+            await updateCustomer(selectedCustomer.id, {
+              email: sublimationData.email || selectedCustomer.email || null,
+              address: sublimationData.address || selectedCustomer.address || null,
+              businessName: sublimationData.businessName || selectedCustomer.businessName || null
+            })
+          }
+        }
+
+        // Calculate order amounts from cart items
+        const totalAmount = cartItems.reduce((sum, item) => sum + (parseFloat(item.totalPrice) || 0), 0)
+        const downPayment = parseFloat(sublimationData.downPayment || 0) || 0
+        const amountPaid = downPayment
+        const balance = totalAmount - downPayment
+
+        // Prepare order data object
+        const orderData = {
+          customerName: sublimationData.customerName.trim(),
+          customerContact: sublimationData.contactNumber.trim(),
+          orderType: 'Sublimation',
+          status: 'pending',
+          totalAmount: totalAmount,
+          amountPaid: amountPaid,
+          balance: balance,
+          rushOrder: sublimationData.rushOrder === true,
+          receivedBy: user?.employeeName || 'Unknown',
+          orderData: {
+            ...sublimationData,
+            cartItems: cartItems, // Include cart items in orderData
+            // Include all sublimation data in orderData JSONB field
+          }
+        }
+
+        // Only include customerId if it exists (not null)
+        if (customerId !== null && customerId !== undefined) {
+          orderData.customerId = customerId
+        }
+
+        // Log order data before creation for debugging
+        console.log('Creating Sublimation order with data:', {
+          customerName: orderData.customerName,
+          customerContact: orderData.customerContact,
+          orderType: orderData.orderType,
+          totalAmount: orderData.totalAmount,
+          cartItemsCount: cartItems.length,
+          hasCustomerId: !!orderData.customerId
+        })
+
+        const createdOrder = await createOrder(orderData)
+
+        // Log successful creation
+        console.log('Sublimation order created successfully:', {
+          orderId: createdOrder.id,
+          orderType: createdOrder.orderType,
+          status: createdOrder.status
+        })
+
+        // Auto-print receipt
+        printSublimationReceipt(createdOrder, sublimationData, cartItems)
+
+        // Show success message
+        showAlert('success', 'Order Created', `Sublimation order #${createdOrder.id} created successfully!`)
+
+        // Redirect to order tracking after a short delay
+        setTimeout(() => {
+          if (onOrderCreated) {
+            onOrderCreated()
+          }
+        }, 2000)
+      } else if (orderType === 'Repairs') {
+        // Submit order logic here
+        console.log('Order submitted:', { orderType, repairData })
+        
+        // Generate and print repair receipt
+        printRepairReceipt()
+        
+        alert('Repair order created successfully! Receipt is ready to print.')
+      }
+    } catch (error) {
+      console.error('Error submitting order:', error)
+      const errorMessage = error?.message || error?.error?.message || 'Unknown error occurred'
+      showAlert('error', 'Error', `Error creating order: ${errorMessage}`)
+    }
+  }
+
+  const printTarpaulinReceipt = async (order, orderData) => {
+    const currentDate = new Date().toLocaleString('en-US', {
+      month: '2-digit',
+      day: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    })
+
+    const orderId = order.id ? order.id.toString() : Date.now().toString()
+    const receiptNo = order.id ? `25-200-${order.id.toString().padStart(6, '0')}` : `25-200-${Date.now().toString().slice(-6)}`
+
+    // Generate proper Code 128 barcode SVG with actual bars
+    // Code 128 uses bar/space widths: each digit in pattern = width in modules (1-4)
+    const generateCode128BarcodeSVG = (data) => {
+      // Code 128 Code B patterns - each pattern is [bar1, space1, bar2, space2, bar3, space3, bar4]
+      // Values represent module widths (1-4)
+      const code128B = {
+        ' ': [2,1,1,2,2,2,2], '!': [2,1,2,2,2,1,2], '"': [2,2,2,1,2,1,2], '#': [1,1,2,2,1,2,2],
+        '$': [1,1,2,2,2,2,1], '%': [1,2,2,1,1,2,2], '&': [1,2,2,1,2,2,1], "'": [1,2,2,2,2,1,1],
+        '(': [1,1,1,2,2,1,2], ')': [1,1,1,2,2,2,1], '*': [1,2,1,1,2,2,2], '+': [1,2,1,2,2,1,2],
+        ',': [1,2,2,2,1,1,2], '-': [1,1,2,1,2,2,2], '.': [1,1,2,2,2,1,2], '/': [1,1,1,2,1,2,2],
+        '0': [2,2,1,2,1,1,2], '1': [2,2,1,2,1,2,1], '2': [2,2,1,1,2,1,2], '3': [2,1,2,2,1,1,2],
+        '4': [2,1,2,2,1,2,1], '5': [2,1,1,2,2,1,2], '6': [2,1,1,1,2,2,2], '7': [2,1,2,1,1,2,2],
+        '8': [2,1,2,1,2,2,1], '9': [2,2,2,1,1,1,2], ':': [1,1,2,1,2,1,2], ';': [1,1,2,1,2,2,1],
+        '<': [1,1,2,2,1,2,1], '=': [1,2,1,1,1,2,2], '>': [1,2,1,2,1,1,2], '?': [1,2,1,2,2,1,1],
+        '@': [1,1,1,2,1,1,2], 'A': [1,1,1,2,1,2,1], 'B': [1,1,1,1,2,1,2], 'C': [1,2,1,1,1,1,2],
+        'D': [1,2,1,1,1,2,1], 'E': [1,2,1,1,2,1,1], 'F': [1,1,1,2,2,1,1], 'G': [1,2,1,2,1,1,1],
+        'H': [1,1,2,1,1,1,2], 'I': [1,1,2,1,1,2,1], 'J': [1,1,2,1,2,1,1], 'K': [1,2,2,2,1,1,1],
+        'L': [1,1,1,1,1,2,2], 'M': [1,1,1,1,2,2,1], 'N': [1,1,1,2,1,1,1], 'O': [1,2,2,1,1,1,1],
+        'P': [1,1,2,2,1,1,1], 'Q': [2,1,1,1,1,1,2], 'R': [2,1,1,1,1,2,1], 'S': [2,1,1,1,2,1,1],
+        'T': [2,1,1,2,1,1,1], 'U': [2,2,1,1,1,1,1], 'V': [1,1,2,2,2,1,1], 'W': [1,1,1,1,1,1,2],
+        'X': [1,1,1,1,1,2,1], 'Y': [1,1,1,1,2,1,1], 'Z': [2,1,2,1,1,1,1]
+      }
+      
+      // Start code B (value 104)
+      const startPattern = [2,1,1,2,2,2,2]
+      
+      // Calculate checksum
+      let checksum = 104
+      const dataStr = data.toString().toUpperCase()
+      const charKeys = Object.keys(code128B)
+      
+      let bars = []
+      
+      // Add start pattern
+      for (let i = 0; i < startPattern.length; i++) {
+        if (i % 2 === 0) {
+          bars.push({ type: 'bar', width: startPattern[i] })
+        } else {
+          bars.push({ type: 'space', width: startPattern[i] })
+        }
+      }
+      
+      // Process data characters
+      for (let i = 0; i < dataStr.length; i++) {
+        const char = dataStr[i]
+        if (code128B[char]) {
+          const pattern = code128B[char]
+          const charValue = charKeys.indexOf(char)
+          if (charValue >= 0) {
+            checksum += charValue * (i + 1)
+          }
+          
+          // Add character pattern
+          for (let j = 0; j < pattern.length; j++) {
+            if (j % 2 === 0) {
+              bars.push({ type: 'bar', width: pattern[j] })
+            } else {
+              bars.push({ type: 'space', width: pattern[j] })
+            }
+          }
+        }
+      }
+      
+      // Add checksum character
+      checksum = checksum % 103
+      const checkChar = charKeys[checksum] || '0'
+      if (code128B[checkChar]) {
+        const checkPattern = code128B[checkChar]
+        for (let j = 0; j < checkPattern.length; j++) {
+          if (j % 2 === 0) {
+            bars.push({ type: 'bar', width: checkPattern[j] })
+          } else {
+            bars.push({ type: 'space', width: checkPattern[j] })
+          }
+        }
+      }
+      
+      // Stop pattern: [2,3,3,1,1,1,2]
+      const stopPattern = [2,3,3,1,1,1,2]
+      for (let j = 0; j < stopPattern.length; j++) {
+        if (j % 2 === 0) {
+          bars.push({ type: 'bar', width: stopPattern[j] })
+        } else {
+          bars.push({ type: 'space', width: stopPattern[j] })
+        }
+      }
+      
+      // Generate SVG optimized for thermal receipt printers (80mm paper)
+      // Thermal printers need larger module widths and proper sizing
+      const moduleWidth = 2.5 // Increased for thermal printer readability
+      const barHeight = 50 // Height in mm (good for thermal printers)
+      const quietZoneModules = 10 // Quiet zone in modules
+      const quietZone = quietZoneModules * moduleWidth
+      
+      // Calculate total width
+      let totalWidth = quietZone * 2
+      bars.forEach(bar => {
+        totalWidth += bar.width * moduleWidth
+      })
+      
+      // Ensure barcode fits on 80mm paper (approximately 300px at 96dpi)
+      const maxWidth = 280 // Leave margin for 80mm paper
+      let scale = 1
+      if (totalWidth > maxWidth) {
+        scale = maxWidth / totalWidth
+      }
+      
+      const scaledModuleWidth = moduleWidth * scale
+      const scaledBarHeight = barHeight * scale
+      const scaledQuietZone = quietZoneModules * scaledModuleWidth
+      
+      // Recalculate with scale
+      let scaledTotalWidth = scaledQuietZone * 2
+      bars.forEach(bar => {
+        scaledTotalWidth += bar.width * scaledModuleWidth
+      })
+      
+      let svg = `<svg width="${scaledTotalWidth}" height="${scaledBarHeight + 25}" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto; background: white;">`
+      let x = scaledQuietZone
+      
+      // Draw bars and spaces with crisp edges
+      bars.forEach(bar => {
+        const width = bar.width * scaledModuleWidth
+        if (bar.type === 'bar') {
+          // Use pure black and ensure crisp rendering
+          svg += `<rect x="${Math.round(x)}" y="0" width="${Math.round(width)}" height="${Math.round(scaledBarHeight)}" fill="#000000" stroke="none"/>`
+        }
+        x += width
+      })
+      
+      // Add text below barcode
+      svg += `<text x="${scaledTotalWidth / 2}" y="${scaledBarHeight + 18}" text-anchor="middle" font-family="Arial, sans-serif" font-size="${12 * scale}" font-weight="bold" fill="black">${data}</text>`
+      svg += '</svg>'
+      
+      return svg
+    }
+
+    const barcodeSVG = generateCode128BarcodeSVG(receiptNo)
+
+    const receiptHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Tarpaulin Order - ${orderData.customerName}</title>
+        <style>
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
+          body {
+            font-family: 'Arial', 'Helvetica', sans-serif;
+            padding: 10px;
+            background: white;
+            color: #000;
+            line-height: 1.5;
+          }
+          .receipt {
+            max-width: 80mm;
+            margin: 0 auto;
+            background: white;
+            padding: 0;
+          }
+          .header {
+            text-align: center;
+            padding: 18px 0 12px 0;
+            margin-bottom: 15px;
+            border-bottom: 3px solid #000;
+            position: relative;
+          }
+          .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60px;
+            height: 3px;
+            background: #000;
+          }
+          .header .logo-text {
+            font-size: 36px;
+            font-weight: 900;
+            letter-spacing: 4px;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            line-height: 1.1;
+          }
+          .header .store-name {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            color: #333;
+            line-height: 1.3;
+          }
+          .header .address {
+            font-size: 13px;
+            margin-bottom: 5px;
+            line-height: 1.5;
+            color: #555;
+            font-weight: 500;
+          }
+          .transaction-info {
+            margin: 15px 0;
+            font-size: 13px;
+            line-height: 1.7;
+            background: #f9f9f9;
+            padding: 10px 12px;
+            border-left: 3px solid #000;
+          }
+          .transaction-info .receipt-no {
+            font-weight: 700;
+            margin-bottom: 4px;
+            font-size: 14px;
+            color: #000;
+          }
+          .transaction-info .date-time {
+            margin-bottom: 4px;
+            color: #333;
+          }
+          .transaction-info > div:last-child {
+            color: #555;
+          }
+          .divider {
+            text-align: center;
+            margin: 15px 0;
+            font-size: 16px;
+            letter-spacing: 2px;
+            border-top: 2px solid #000;
+            border-bottom: 2px solid #000;
+            padding: 8px 0;
+            font-weight: bold;
+          }
+          .section {
+            margin-bottom: 15px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #ddd;
+          }
+          .section:last-of-type {
+            border-bottom: 2px solid #000;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+          }
+          .section-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding-bottom: 5px;
+            border-bottom: 2px solid #000;
+            color: #000;
+          }
+          .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 7px;
+            font-size: 14px;
+            line-height: 1.6;
+            padding: 3px 0;
+          }
+          .info-row .label {
+            font-weight: 600;
+            text-align: left;
+            min-width: 45%;
+            color: #333;
+          }
+          .info-row .value {
+            text-align: right;
+            flex: 1;
+            word-break: break-word;
+            color: #000;
+            font-weight: 500;
+          }
+          .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            background: #000;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-radius: 2px;
+          }
+          .barcode-section {
+            text-align: center;
+            margin: 20px 0 10px 0;
+            padding: 10px 0;
+          }
+          .barcode-container {
+            display: block;
+            margin: 10px auto;
+            text-align: center;
+            background: white;
+            padding: 5px 0;
+          }
+          .barcode-svg {
+            display: block;
+            margin: 0 auto;
+            max-width: 100%;
+            height: auto;
+            image-rendering: crisp-edges;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: pixelated;
+          }
+          .barcode-number {
+            font-size: 16px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            margin-top: 8px;
+            font-family: 'Arial', sans-serif;
+          }
+          @media print {
+            .barcode-svg {
+              image-rendering: auto;
+            }
+          }
+          .footer {
+            text-align: center;
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 2px solid #000;
+          }
+          .footer .thank-you {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+            color: #000;
+          }
+          .footer .system-info {
+            font-size: 10px;
+            color: #666;
+            margin-top: 8px;
+            font-weight: 500;
+          }
+          @media print {
+            body {
+              padding: 5px;
+            }
+            .receipt {
+              max-width: 100%;
+            }
+            .barcode-svg {
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+              color-adjust: exact;
+            }
+            .barcode-svg rect {
+              fill: #000000 !important;
+              stroke: none !important;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="receipt">
+          <div class="header">
+            <div class="logo-text">IRONWOLF</div>
+            <div class="store-name">DIGITAL PRINTING</div>
+            <div class="address">D' Flores Street<br>7302 Lamitan</div>
+          </div>
+
+          <div class="transaction-info">
+            <div class="receipt-no">Receipt No.: ${receiptNo}</div>
+            <div class="date-time">${currentDate}</div>
+            <div>User: ${user?.employeeName || 'System'}</div>
+          </div>
+
+          <div class="divider">━━━━━━━━━━━━━━━━</div>
+
+          <div class="section">
+            <div class="section-title">Customer Information</div>
+            <div class="info-row">
+              <span class="label">Name:</span>
+              <span class="value">${orderData.customerName || 'N/A'}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Contact:</span>
+              <span class="value">${orderData.contactNumber || 'N/A'}</span>
+            </div>
+            ${orderData.email ? `
+            <div class="info-row">
+              <span class="label">Email:</span>
+              <span class="value">${orderData.email}</span>
+            </div>
+            ` : ''}
+            ${orderData.address ? `
+            <div class="info-row">
+              <span class="label">Address:</span>
+              <span class="value">${orderData.address}</span>
+            </div>
+            ` : ''}
+          </div>
+
+          <div class="section">
+            <div class="section-title">Order Details</div>
+            ${orderData.width && orderData.height ? `
+            <div class="info-row">
+              <span class="label">Size:</span>
+              <span class="value">${orderData.width} × ${orderData.height} ft</span>
+            </div>
+            ` : ''}
+            ${orderData.orientation ? `
+            <div class="info-row">
+              <span class="label">Orientation:</span>
+              <span class="value">${orderData.orientation}</span>
+            </div>
+            ` : ''}
+            <div class="info-row">
+              <span class="label">Quantity:</span>
+              <span class="value">${orderData.quantity || '1'} pc(s)</span>
+            </div>
+            ${orderData.isPahabol ? `
+            <div class="info-row">
+              <span class="label">Order Type:</span>
+              <span class="value"><span class="badge">PAHABOL</span></span>
+            </div>
+            ` : ''}
+            ${orderData.rushOrder ? `
+            <div class="info-row">
+              <span class="label">Priority:</span>
+              <span class="value"><span class="badge">RUSH ORDER</span></span>
+            </div>
+            ` : ''}
+          </div>
+
+          ${orderData.assignedArtist ? `
+          <div class="section">
+            <div class="section-title">Assigned Artist</div>
+            <div class="info-row">
+              <span class="label">Artist:</span>
+              <span class="value">${orderData.assignedArtist}</span>
+            </div>
+          </div>
+          ` : ''}
+
+          <div class="section">
+            <div class="section-title">Payment Information</div>
+            <div class="info-row">
+              <span class="label">Payment Method:</span>
+              <span class="value">${orderData.paymentMethod || 'Cash'}</span>
+            </div>
+            ${orderData.downPayment ? `
+            <div class="info-row">
+              <span class="label">Down Payment:</span>
+              <span class="value">₱${parseFloat(orderData.downPayment).toFixed(2)}</span>
+            </div>
+            ` : ''}
+          </div>
+
+          <div class="divider">━━━━━━━━━━━━━━━━</div>
+
+          <div class="barcode-section">
+            <div class="barcode-container">
+              ${barcodeSVG}
+            </div>
+            <div class="barcode-number">${receiptNo}</div>
+          </div>
+
+          <div class="footer">
+            <div class="thank-you">Thank you for your business!</div>
+            <div class="thank-you" style="font-size: 13px; margin-top: 5px;">Please come again</div>
+            <div class="system-info">IRONWOLF DIGITAL PRINTING SYSTEM v1.2.1</div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+
+    // Try to print to xprinter via network API
+    try {
+      // Method 1: Send to backend API for network printing
+      const printResponse = await fetch('http://localhost:3001/api/print', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          printerName: 'xprinter', // or the exact network printer name/IP
+          printerIP: '192.168.1.100', // Replace with actual xprinter IP
+          html: receiptHTML,
+          orderId: order.id
+        })
+      })
+
+      if (printResponse.ok) {
+        const result = await printResponse.json()
+        console.log('Print job sent to xprinter successfully:', result)
+        return
+      } else {
+        const errorData = await printResponse.json().catch(() => ({}))
+        console.warn('Print server returned error:', errorData)
+      }
+    } catch (error) {
+      console.warn('Network printing failed, falling back to browser print:', error)
+    }
+
+    // Fallback: Use browser print (will show print dialog)
+    const receiptWindow = window.open('', '_blank', 'width=800,height=600')
+    receiptWindow.document.write(receiptHTML)
+    receiptWindow.document.close()
     
-    // Generate and print repair receipt
-    printRepairReceipt()
+    // Auto-print after a short delay
+    setTimeout(() => {
+      receiptWindow.focus()
+      receiptWindow.print()
+    }, 500)
+  }
+
+  const printSublimationReceipt = async (order, orderData, cartItems) => {
+    const currentDate = new Date().toLocaleString('en-US', {
+      month: '2-digit',
+      day: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    })
+
+    const orderId = order.id ? order.id.toString() : Date.now().toString()
+    const receiptNo = order.id ? `25-300-${order.id.toString().padStart(6, '0')}` : `25-300-${Date.now().toString().slice(-6)}`
+
+    // Generate proper Code 128 barcode SVG with actual bars
+    // Code 128 uses bar/space widths: each digit in pattern = width in modules (1-4)
+    const generateCode128BarcodeSVG = (data) => {
+      // Code 128 Code B patterns - each pattern is [bar1, space1, bar2, space2, bar3, space3, bar4]
+      // Values represent module widths (1-4)
+      const code128B = {
+        ' ': [2,1,1,2,2,2,2], '!': [2,1,2,2,2,1,2], '"': [2,2,2,1,2,1,2], '#': [1,1,2,2,1,2,2],
+        '$': [1,1,2,2,2,2,1], '%': [1,2,2,1,1,2,2], '&': [1,2,2,1,2,2,1], "'": [1,2,2,2,2,1,1],
+        '(': [1,1,1,2,2,1,2], ')': [1,1,1,2,2,2,1], '*': [1,2,1,1,2,2,2], '+': [1,2,1,2,2,1,2],
+        ',': [1,2,2,2,1,1,2], '-': [1,1,2,1,2,2,2], '.': [1,1,2,2,2,1,2], '/': [1,1,1,2,1,2,2],
+        '0': [2,2,1,2,1,1,2], '1': [2,2,1,2,1,2,1], '2': [2,2,1,1,2,1,2], '3': [2,1,2,2,1,1,2],
+        '4': [2,1,2,2,1,2,1], '5': [2,1,1,2,2,1,2], '6': [2,1,1,1,2,2,2], '7': [2,1,2,1,1,2,2],
+        '8': [2,1,2,1,2,2,1], '9': [2,2,2,1,1,1,2], ':': [1,1,2,1,2,1,2], ';': [1,1,2,1,2,2,1],
+        '<': [1,1,2,2,1,2,1], '=': [1,2,1,1,1,2,2], '>': [1,2,1,2,1,1,2], '?': [1,2,1,2,2,1,1],
+        '@': [1,1,1,2,1,1,2], 'A': [1,1,1,2,1,2,1], 'B': [1,1,1,1,2,1,2], 'C': [1,2,1,1,1,1,2],
+        'D': [1,2,1,1,1,2,1], 'E': [1,2,1,1,2,1,1], 'F': [1,1,1,2,2,1,1], 'G': [1,2,1,2,1,1,1],
+        'H': [1,1,2,1,1,1,2], 'I': [1,1,2,1,1,2,1], 'J': [1,1,2,1,2,1,1], 'K': [1,2,2,2,1,1,1],
+        'L': [1,1,1,1,1,2,2], 'M': [1,1,1,1,2,2,1], 'N': [1,1,1,2,1,1,1], 'O': [1,2,2,1,1,1,1],
+        'P': [1,1,2,2,1,1,1], 'Q': [2,1,1,1,1,1,2], 'R': [2,1,1,1,1,2,1], 'S': [2,1,1,1,2,1,1],
+        'T': [2,1,1,2,1,1,1], 'U': [2,2,1,1,1,1,1], 'V': [1,1,2,2,2,1,1], 'W': [1,1,1,1,1,1,2],
+        'X': [1,1,1,1,1,2,1], 'Y': [1,1,1,1,2,1,1], 'Z': [2,1,2,1,1,1,1]
+      }
+      
+      // Start code B (value 104)
+      const startPattern = [2,1,1,2,2,2,2]
+      
+      // Calculate checksum
+      let checksum = 104
+      const dataStr = data.toString().toUpperCase()
+      const charKeys = Object.keys(code128B)
+      
+      let bars = []
+      
+      // Add start pattern
+      for (let i = 0; i < startPattern.length; i++) {
+        if (i % 2 === 0) {
+          bars.push({ type: 'bar', width: startPattern[i] })
+        } else {
+          bars.push({ type: 'space', width: startPattern[i] })
+        }
+      }
+      
+      // Process data characters
+      for (let i = 0; i < dataStr.length; i++) {
+        const char = dataStr[i]
+        if (code128B[char]) {
+          const pattern = code128B[char]
+          const charValue = charKeys.indexOf(char)
+          if (charValue >= 0) {
+            checksum += charValue * (i + 1)
+          }
+          
+          // Add character pattern
+          for (let j = 0; j < pattern.length; j++) {
+            if (j % 2 === 0) {
+              bars.push({ type: 'bar', width: pattern[j] })
+            } else {
+              bars.push({ type: 'space', width: pattern[j] })
+            }
+          }
+        }
+      }
+      
+      // Add checksum character
+      checksum = checksum % 103
+      const checkChar = charKeys[checksum] || '0'
+      if (code128B[checkChar]) {
+        const checkPattern = code128B[checkChar]
+        for (let j = 0; j < checkPattern.length; j++) {
+          if (j % 2 === 0) {
+            bars.push({ type: 'bar', width: checkPattern[j] })
+          } else {
+            bars.push({ type: 'space', width: checkPattern[j] })
+          }
+        }
+      }
+      
+      // Stop pattern: [2,3,3,1,1,1,2]
+      const stopPattern = [2,3,3,1,1,1,2]
+      for (let j = 0; j < stopPattern.length; j++) {
+        if (j % 2 === 0) {
+          bars.push({ type: 'bar', width: stopPattern[j] })
+        } else {
+          bars.push({ type: 'space', width: stopPattern[j] })
+        }
+      }
+      
+      // Generate SVG optimized for thermal receipt printers (80mm paper)
+      // Thermal printers need larger module widths and proper sizing
+      const moduleWidth = 2.5 // Increased for thermal printer readability
+      const barHeight = 50 // Height in mm (good for thermal printers)
+      const quietZoneModules = 10 // Quiet zone in modules
+      const quietZone = quietZoneModules * moduleWidth
+      
+      // Calculate total width
+      let totalWidth = quietZone * 2
+      bars.forEach(bar => {
+        totalWidth += bar.width * moduleWidth
+      })
+      
+      // Ensure barcode fits on 80mm paper (approximately 300px at 96dpi)
+      const maxWidth = 280 // Leave margin for 80mm paper
+      let scale = 1
+      if (totalWidth > maxWidth) {
+        scale = maxWidth / totalWidth
+      }
+      
+      const scaledModuleWidth = moduleWidth * scale
+      const scaledBarHeight = barHeight * scale
+      const scaledQuietZone = quietZoneModules * scaledModuleWidth
+      
+      // Recalculate with scale
+      let scaledTotalWidth = scaledQuietZone * 2
+      bars.forEach(bar => {
+        scaledTotalWidth += bar.width * scaledModuleWidth
+      })
+      
+      let svg = `<svg width="${scaledTotalWidth}" height="${scaledBarHeight + 25}" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto; background: white;">`
+      let x = scaledQuietZone
+      
+      // Draw bars and spaces with crisp edges
+      bars.forEach(bar => {
+        const width = bar.width * scaledModuleWidth
+        if (bar.type === 'bar') {
+          // Use pure black and ensure crisp rendering
+          svg += `<rect x="${Math.round(x)}" y="0" width="${Math.round(width)}" height="${Math.round(scaledBarHeight)}" fill="#000000" stroke="none"/>`
+        }
+        x += width
+      })
+      
+      // Add text below barcode
+      svg += `<text x="${scaledTotalWidth / 2}" y="${scaledBarHeight + 18}" text-anchor="middle" font-family="Arial, sans-serif" font-size="${12 * scale}" font-weight="bold" fill="black">${data}</text>`
+      svg += '</svg>'
+      
+      return svg
+    }
+
+    const barcodeSVG = generateCode128BarcodeSVG(receiptNo)
+
+    // Calculate totals from cart items
+    const totalAmount = cartItems.reduce((sum, item) => sum + (parseFloat(item.totalPrice) || 0), 0)
+    const downPayment = parseFloat(orderData.downPayment || 0) || 0
+    const balance = totalAmount - downPayment
+
+    // Generate cart items HTML
+    const cartItemsHTML = cartItems.map(item => {
+      const sizes = item.sizes && item.sizes.length > 0 
+        ? item.sizes.map(s => `${s.size}: ${s.quantity}`).join(', ')
+        : 'N/A'
+      return `
+        <div class="cart-item">
+          <div class="cart-item-header">
+            <span class="cart-item-name">${item.productType || 'N/A'}</span>
+            <span class="cart-item-price">₱${parseFloat(item.totalPrice || 0).toFixed(2)}</span>
+          </div>
+          ${sizes !== 'N/A' ? `<div class="cart-item-sizes">Sizes: ${sizes}</div>` : ''}
+          ${item.quantity ? `<div class="cart-item-qty">Qty: ${item.quantity} pc(s)</div>` : ''}
+        </div>
+      `
+    }).join('')
+
+    const receiptHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Sublimation Order - ${orderData.customerName}</title>
+        <style>
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
+          body {
+            font-family: 'Arial', 'Helvetica', sans-serif;
+            padding: 10px;
+            background: white;
+            color: #000;
+            line-height: 1.5;
+          }
+          .receipt {
+            max-width: 80mm;
+            margin: 0 auto;
+            background: white;
+            padding: 0;
+          }
+          .header {
+            text-align: center;
+            padding: 18px 0 12px 0;
+            margin-bottom: 15px;
+            border-bottom: 3px solid #000;
+            position: relative;
+          }
+          .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60px;
+            height: 3px;
+            background: #000;
+          }
+          .header .logo-text {
+            font-size: 36px;
+            font-weight: 900;
+            letter-spacing: 4px;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            line-height: 1.1;
+          }
+          .header .store-name {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            color: #333;
+            line-height: 1.3;
+          }
+          .header .address {
+            font-size: 13px;
+            margin-bottom: 5px;
+            line-height: 1.5;
+            color: #555;
+            font-weight: 500;
+          }
+          .transaction-info {
+            margin: 15px 0;
+            font-size: 13px;
+            line-height: 1.7;
+            background: #f9f9f9;
+            padding: 10px 12px;
+            border-left: 3px solid #000;
+          }
+          .transaction-info .receipt-no {
+            font-weight: 700;
+            margin-bottom: 4px;
+            font-size: 14px;
+            color: #000;
+          }
+          .transaction-info .date-time {
+            margin-bottom: 4px;
+            color: #333;
+          }
+          .transaction-info > div:last-child {
+            color: #555;
+          }
+          .divider {
+            text-align: center;
+            margin: 15px 0;
+            font-size: 16px;
+            letter-spacing: 2px;
+            border-top: 2px solid #000;
+            border-bottom: 2px solid #000;
+            padding: 8px 0;
+            font-weight: bold;
+          }
+          .section {
+            margin-bottom: 15px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #ddd;
+          }
+          .section:last-of-type {
+            border-bottom: 2px solid #000;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+          }
+          .section-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding-bottom: 5px;
+            border-bottom: 2px solid #000;
+            color: #000;
+          }
+          .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 7px;
+            font-size: 14px;
+            line-height: 1.6;
+            padding: 3px 0;
+          }
+          .info-row .label {
+            font-weight: 600;
+            text-align: left;
+            min-width: 45%;
+            color: #333;
+          }
+          .info-row .value {
+            text-align: right;
+            flex: 1;
+            word-break: break-word;
+            color: #000;
+            font-weight: 500;
+          }
+          .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            background: #000;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-radius: 2px;
+          }
+          .cart-item {
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px dashed #ccc;
+          }
+          .cart-item:last-child {
+            border-bottom: none;
+          }
+          .cart-item-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+          }
+          .cart-item-name {
+            font-weight: 600;
+            font-size: 14px;
+            color: #000;
+          }
+          .cart-item-price {
+            font-weight: 700;
+            font-size: 14px;
+            color: #000;
+          }
+          .cart-item-sizes {
+            font-size: 12px;
+            color: #555;
+            margin-top: 2px;
+          }
+          .cart-item-qty {
+            font-size: 12px;
+            color: #555;
+            margin-top: 2px;
+          }
+          .barcode-section {
+            text-align: center;
+            margin: 20px 0 10px 0;
+            padding: 10px 0;
+          }
+          .barcode-container {
+            display: block;
+            margin: 10px auto;
+            text-align: center;
+            background: white;
+            padding: 5px 0;
+          }
+          .barcode-svg {
+            display: block;
+            margin: 0 auto;
+            max-width: 100%;
+            height: auto;
+            image-rendering: crisp-edges;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: pixelated;
+          }
+          .barcode-number {
+            font-size: 16px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            margin-top: 8px;
+            font-family: 'Arial', sans-serif;
+          }
+          @media print {
+            .barcode-svg {
+              image-rendering: auto;
+            }
+          }
+          .footer {
+            text-align: center;
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 2px solid #000;
+          }
+          .footer .thank-you {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+            color: #000;
+          }
+          .footer .system-info {
+            font-size: 10px;
+            color: #666;
+            margin-top: 8px;
+            font-weight: 500;
+          }
+          @media print {
+            body {
+              padding: 5px;
+            }
+            .receipt {
+              max-width: 100%;
+            }
+            .barcode-svg {
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+              color-adjust: exact;
+            }
+            .barcode-svg rect {
+              fill: #000000 !important;
+              stroke: none !important;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="receipt">
+          <div class="header">
+            <div class="logo-text">IRONWOLF</div>
+            <div class="store-name">DIGITAL PRINTING</div>
+            <div class="address">D' Flores Street<br>7302 Lamitan</div>
+          </div>
+
+          <div class="transaction-info">
+            <div class="receipt-no">Receipt No.: ${receiptNo}</div>
+            <div class="date-time">${currentDate}</div>
+            <div>User: ${user?.employeeName || 'System'}</div>
+          </div>
+
+          <div class="divider">━━━━━━━━━━━━━━━━</div>
+
+          <div class="section">
+            <div class="section-title">Customer Information</div>
+            <div class="info-row">
+              <span class="label">Name:</span>
+              <span class="value">${orderData.customerName || 'N/A'}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Contact:</span>
+              <span class="value">${orderData.contactNumber || 'N/A'}</span>
+            </div>
+            ${orderData.email ? `
+            <div class="info-row">
+              <span class="label">Email:</span>
+              <span class="value">${orderData.email}</span>
+            </div>
+            ` : ''}
+            ${orderData.address ? `
+            <div class="info-row">
+              <span class="label">Address:</span>
+              <span class="value">${orderData.address}</span>
+            </div>
+            ` : ''}
+          </div>
+
+          <div class="section">
+            <div class="section-title">Order Items</div>
+            ${cartItemsHTML}
+          </div>
+
+          ${orderData.rushOrder ? `
+          <div class="section">
+            <div class="info-row">
+              <span class="label">Priority:</span>
+              <span class="value"><span class="badge">RUSH ORDER</span></span>
+            </div>
+          </div>
+          ` : ''}
+
+          ${orderData.assignedArtist ? `
+          <div class="section">
+            <div class="section-title">Assigned Artist</div>
+            <div class="info-row">
+              <span class="label">Artist:</span>
+              <span class="value">${orderData.assignedArtist}</span>
+            </div>
+          </div>
+          ` : ''}
+
+          <div class="section">
+            <div class="section-title">Payment Information</div>
+            <div class="info-row">
+              <span class="label">Total Amount:</span>
+              <span class="value">₱${totalAmount.toFixed(2)}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Payment Method:</span>
+              <span class="value">${orderData.paymentMethod || 'Cash'}</span>
+            </div>
+            ${downPayment > 0 ? `
+            <div class="info-row">
+              <span class="label">Down Payment:</span>
+              <span class="value">₱${downPayment.toFixed(2)}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Balance:</span>
+              <span class="value">₱${balance.toFixed(2)}</span>
+            </div>
+            ` : ''}
+          </div>
+
+          <div class="divider">━━━━━━━━━━━━━━━━</div>
+
+          <div class="barcode-section">
+            <div class="barcode-container">
+              ${barcodeSVG}
+            </div>
+            <div class="barcode-number">${receiptNo}</div>
+          </div>
+
+          <div class="footer">
+            <div class="thank-you">Thank you for your business!</div>
+            <div class="thank-you" style="font-size: 13px; margin-top: 5px;">Please come again</div>
+            <div class="system-info">IRONWOLF DIGITAL PRINTING SYSTEM v1.2.1</div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+
+    // Try to print to xprinter via network API
+    try {
+      // Method 1: Send to backend API for network printing
+      const printResponse = await fetch('http://localhost:3001/api/print', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          printerName: 'xprinter', // or the exact network printer name/IP
+          printerIP: '192.168.1.100', // Replace with actual xprinter IP
+          html: receiptHTML,
+          orderId: order.id
+        })
+      })
+
+      if (printResponse.ok) {
+        const result = await printResponse.json()
+        console.log('Print job sent to xprinter successfully:', result)
+        return
+      } else {
+        const errorData = await printResponse.json().catch(() => ({}))
+        console.warn('Print server returned error:', errorData)
+      }
+    } catch (error) {
+      console.warn('Network printing failed, falling back to browser print:', error)
+    }
+
+    // Fallback: Use browser print (will show print dialog)
+    const receiptWindow = window.open('', '_blank', 'width=800,height=600')
+    receiptWindow.document.write(receiptHTML)
+    receiptWindow.document.close()
     
-    alert('Repair order created successfully! Receipt is ready to print.')
+    // Auto-print after a short delay
+    setTimeout(() => {
+      receiptWindow.focus()
+      receiptWindow.print()
+    }, 500)
   }
 
   const printRepairReceipt = () => {
@@ -1538,7 +3386,7 @@ function CreateOrderView() {
       <body>
         <div class="receipt">
           <div class="header">
-            <h1>IRONWOLF SHOP</h1>
+            <h1>IRONWOLF DIGITAL PRINTING</h1>
             <h2>REPAIR ORDER</h2>
             <div style="font-size: 11px; margin-top: 5px;">
               ${currentDate}
@@ -1617,7 +3465,7 @@ function CreateOrderView() {
 
           <div class="footer">
             <div style="margin-bottom: 5px;">
-              <strong>IRONWOLF SHOP SYSTEM v1.2.1</strong>
+              <strong>IRONWOLF DIGITAL PRINTING SYSTEM v1.2.1</strong>
             </div>
             <div>
               Keep this receipt for your records
@@ -1658,8 +3506,9 @@ function CreateOrderView() {
     ? [
         { number: 1, title: 'Select Type', description: 'Choose product category' },
         { number: 2, title: 'Customer Info', description: 'Enter details' },
-        { number: 3, title: 'Order Details', description: 'Product info' },
-        { number: 4, title: 'Payment', description: 'Review & pay' }
+        { number: 3, title: 'Assign Artist', description: 'Select graphic artist' },
+        { number: 4, title: 'Add Products', description: 'Add clothes & sizes' },
+        { number: 5, title: 'Payment', description: 'Review & pay' }
       ]
     : [
         { number: 1, title: 'Select Type', description: 'Choose product category' },
@@ -1691,10 +3540,11 @@ function CreateOrderView() {
                 {step === 2 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && orderType !== 'Sublimation' && `${orderType} - Order Details`}
                 {step === 3 && orderType === 'Repairs' && 'Problem Checklist'}
                 {step === 3 && orderType === 'Tarpaulin' && 'Tarpaulin Order Details'}
-                {step === 3 && orderType === 'Sublimation' && 'Graphic Artist Selection'}
+                {step === 3 && orderType === 'Sublimation' && 'Assign Graphic Artist'}
                 {step === 3 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && orderType !== 'Sublimation' && 'Review Order'}
                 {step === 4 && orderType === 'Tarpaulin' && 'Review & Payment'}
-                {step === 4 && orderType === 'Sublimation' && 'Order Cart'}
+                {step === 4 && orderType === 'Sublimation' && 'Add Products'}
+                {step === 5 && orderType === 'Sublimation' && 'Review & Payment'}
               </h1>
               <p>
                 {step === 1 && 'Select the product category that best fits your project needs'}
@@ -1707,7 +3557,8 @@ function CreateOrderView() {
                 {step === 3 && orderType === 'Sublimation' && 'Assign a graphic artist to handle this order'}
                 {step === 3 && orderType !== 'Repairs' && orderType !== 'Tarpaulin' && orderType !== 'Sublimation' && 'Double-check all details before submitting your order'}
                 {step === 4 && orderType === 'Tarpaulin' && 'Review order summary and process payment'}
-                {step === 4 && orderType === 'Sublimation' && 'Add products to cart and manage your order'}
+                {step === 4 && orderType === 'Sublimation' && 'Add products with different types and sizes'}
+                {step === 5 && orderType === 'Sublimation' && 'Review order summary and process payment'}
               </p>
             </div>
           </div>
@@ -1742,7 +3593,7 @@ function CreateOrderView() {
             )}
             {step === 3 && orderType === 'Sublimation' && (
               <button className="btn-next" onClick={handleNextStep}>
-                Next: Payment →
+                Next: Add Products →
               </button>
             )}
             {step === 3 && orderType === 'Repairs' && (
@@ -1758,6 +3609,11 @@ function CreateOrderView() {
               </button>
             )}
             {step === 4 && orderType === 'Sublimation' && (
+              <button className="btn-next" onClick={handleNextStep}>
+                Next: Payment →
+              </button>
+            )}
+            {step === 5 && orderType === 'Sublimation' && (
               <button className="btn-submit" onClick={handleSubmitOrder}>
                 <CheckCircle size={18} />
                 Process Sublimation Order
@@ -1796,81 +3652,260 @@ function CreateOrderView() {
         <div className="main-order-content">
       {/* Step Content */}
       {step === 1 && (
-        <div className="order-type-selection">
-          <div className="order-type-grid">
-            <div className="order-type-card" onClick={() => handleTypeSelect('Tarpaulin')}>
-              <div className="card-badge">Popular</div>
-              <div className="order-type-icon">
-                <Package size={28} />
+        <div className="order-type-selection-enhanced">
+          <div className="order-type-grid-enhanced">
+            <div className="order-type-card-enhanced" onClick={() => handleTypeSelect('Tarpaulin')}>
+              <div className="card-header-enhanced">
+                <div className="card-badge-enhanced popular">Popular</div>
+                <div className="card-header-main">
+                  <div className="order-type-icon-enhanced">
+                    <Package size={24} />
+                  </div>
+                  <h3>Tarpaulin</h3>
+                </div>
               </div>
-              <h3>Tarpaulin</h3>
-              <p>Banners, posters, and outdoor signage</p>
-              <div className="card-arrow">→</div>
+              <div className="card-body-enhanced">
+                <p className="card-description">Banners, posters, and outdoor signage for events and advertising</p>
+                <div className="card-features">
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Weather-resistant materials</span>
+                  </div>
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Custom sizes available</span>
+                  </div>
+                </div>
+              </div>
+              <div className="card-footer-enhanced">
+                <span className="card-action-text">Select Tarpaulin</span>
+                <div className="card-arrow-enhanced">→</div>
+              </div>
             </div>
-            <div className="order-type-card" onClick={() => handleTypeSelect('Sublimation')}>
-              <div className="card-badge premium">Premium</div>
-              <div className="order-type-icon">
-                <Palette size={28} />
+
+            <div className="order-type-card-enhanced" onClick={() => handleTypeSelect('Sublimation')}>
+              <div className="card-header-enhanced">
+                <div className="card-badge-enhanced premium">Premium</div>
+                <div className="card-header-main">
+                  <div className="order-type-icon-enhanced">
+                    <Palette size={24} />
+                  </div>
+                  <h3>Sublimation</h3>
+                </div>
               </div>
-              <h3>Sublimation</h3>
-              <p>Custom prints on shirts, phone cases, and more</p>
-              <div className="card-arrow">→</div>
+              <div className="card-body-enhanced">
+                <p className="card-description">Custom prints on shirts, phone cases, mugs, and various products</p>
+                <div className="card-features">
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Vibrant, long-lasting prints</span>
+                  </div>
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Multiple product options</span>
+                  </div>
+                </div>
+              </div>
+              <div className="card-footer-enhanced">
+                <span className="card-action-text">Select Sublimation</span>
+                <div className="card-arrow-enhanced">→</div>
+              </div>
             </div>
-            <div className="order-type-card" onClick={() => handleTypeSelect('Mugs')}>
-              <div className="order-type-icon">
-                <Coffee size={28} />
+
+            <div className="order-type-card-enhanced" onClick={() => handleTypeSelect('Mugs')}>
+              <div className="card-header-enhanced">
+                <div className="card-header-main">
+                  <div className="order-type-icon-enhanced">
+                    <Coffee size={24} />
+                  </div>
+                  <h3>Mugs</h3>
+                </div>
               </div>
-              <h3>Mugs</h3>
-              <p>Personalized mugs with custom designs</p>
-              <div className="card-arrow">→</div>
+              <div className="card-body-enhanced">
+                <p className="card-description">Personalized mugs with custom designs and text</p>
+                <div className="card-features">
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Dishwasher safe options</span>
+                  </div>
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Multiple size options</span>
+                  </div>
+                </div>
+              </div>
+              <div className="card-footer-enhanced">
+                <span className="card-action-text">Select Mugs</span>
+                <div className="card-arrow-enhanced">→</div>
+              </div>
             </div>
-            <div className="order-type-card" onClick={() => handleTypeSelect('Stickers')}>
-              <div className="order-type-icon">
-                <Sticker size={28} />
+
+            <div className="order-type-card-enhanced" onClick={() => handleTypeSelect('Stickers')}>
+              <div className="card-header-enhanced">
+                <div className="card-header-main">
+                  <div className="order-type-icon-enhanced">
+                    <Sticker size={24} />
+                  </div>
+                  <h3>Stickers</h3>
+                </div>
               </div>
-              <h3>Stickers</h3>
-              <p>Custom stickers in various sizes and shapes</p>
-              <div className="card-arrow">→</div>
+              <div className="card-body-enhanced">
+                <p className="card-description">Custom stickers in various sizes, shapes, and finishes</p>
+                <div className="card-features">
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Vinyl and paper options</span>
+                  </div>
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Waterproof available</span>
+                  </div>
+                </div>
+              </div>
+              <div className="card-footer-enhanced">
+                <span className="card-action-text">Select Stickers</span>
+                <div className="card-arrow-enhanced">→</div>
+              </div>
             </div>
-            <div className="order-type-card" onClick={() => handleTypeSelect('Document Print')}>
-              <div className="order-type-icon">
-                <FileText size={28} />
+
+            <div className="order-type-card-enhanced" onClick={() => handleTypeSelect('Document Print')}>
+              <div className="card-header-enhanced">
+                <div className="card-header-main">
+                  <div className="order-type-icon-enhanced">
+                    <FileText size={24} />
+                  </div>
+                  <h3>Document Print</h3>
+                </div>
               </div>
-              <h3>Document Print</h3>
-              <p>Professional document printing services</p>
-              <div className="card-arrow">→</div>
+              <div className="card-body-enhanced">
+                <p className="card-description">Professional document printing services for business and personal use</p>
+                <div className="card-features">
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>High-quality paper options</span>
+                  </div>
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Binding services available</span>
+                  </div>
+                </div>
+              </div>
+              <div className="card-footer-enhanced">
+                <span className="card-action-text">Select Document Print</span>
+                <div className="card-arrow-enhanced">→</div>
+              </div>
             </div>
-            <div className="order-type-card" onClick={() => handleTypeSelect('Photo Print')}>
-              <div className="order-type-icon">
-                <Image size={28} />
+
+            <div className="order-type-card-enhanced" onClick={() => handleTypeSelect('Photo Print')}>
+              <div className="card-header-enhanced">
+                <div className="card-header-main">
+                  <div className="order-type-icon-enhanced">
+                    <Image size={24} />
+                  </div>
+                  <h3>Photo Print</h3>
+                </div>
               </div>
-              <h3>Photo Print</h3>
-              <p>High-quality photo printing in any size</p>
-              <div className="card-arrow">→</div>
+              <div className="card-body-enhanced">
+                <p className="card-description">High-quality photo printing in any size with professional finishing</p>
+                <div className="card-features">
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Premium photo paper</span>
+                  </div>
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Multiple size formats</span>
+                  </div>
+                </div>
+              </div>
+              <div className="card-footer-enhanced">
+                <span className="card-action-text">Select Photo Print</span>
+                <div className="card-arrow-enhanced">→</div>
+              </div>
             </div>
-            <div className="order-type-card" onClick={() => handleTypeSelect('Embroidery')}>
-              <div className="order-type-icon">
-                <Scissors size={28} />
+
+            <div className="order-type-card-enhanced" onClick={() => handleTypeSelect('Embroidery')}>
+              <div className="card-header-enhanced">
+                <div className="card-header-main">
+                  <div className="order-type-icon-enhanced">
+                    <Scissors size={24} />
+                  </div>
+                  <h3>Embroidery</h3>
+                </div>
               </div>
-              <h3>Embroidery</h3>
-              <p>Custom embroidery on clothing and fabrics</p>
-              <div className="card-arrow">→</div>
+              <div className="card-body-enhanced">
+                <p className="card-description">Custom embroidery on clothing, fabrics, and accessories</p>
+                <div className="card-features">
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Professional thread quality</span>
+                  </div>
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Custom logo designs</span>
+                  </div>
+                </div>
+              </div>
+              <div className="card-footer-enhanced">
+                <span className="card-action-text">Select Embroidery</span>
+                <div className="card-arrow-enhanced">→</div>
+              </div>
             </div>
-            <div className="order-type-card" onClick={() => handleTypeSelect('Repairs')}>
-              <div className="order-type-icon">
-                <Wrench size={28} />
+
+            <div className="order-type-card-enhanced" onClick={() => handleTypeSelect('Repairs')}>
+              <div className="card-header-enhanced">
+                <div className="card-header-main">
+                  <div className="order-type-icon-enhanced">
+                    <Wrench size={24} />
+                  </div>
+                  <h3>Repairs</h3>
+                </div>
               </div>
-              <h3>Repairs</h3>
-              <p>Equipment and device repair services</p>
-              <div className="card-arrow">→</div>
+              <div className="card-body-enhanced">
+                <p className="card-description">Equipment and device repair services with warranty</p>
+                <div className="card-features">
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Expert technicians</span>
+                  </div>
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Warranty on repairs</span>
+                  </div>
+                </div>
+              </div>
+              <div className="card-footer-enhanced">
+                <span className="card-action-text">Select Repairs</span>
+                <div className="card-arrow-enhanced">→</div>
+              </div>
             </div>
-            <div className="order-type-card" onClick={() => handleTypeSelect('Software Installation')}>
-              <div className="order-type-icon">
-                <Monitor size={28} />
+
+            <div className="order-type-card-enhanced" onClick={() => handleTypeSelect('Software Installation')}>
+              <div className="card-header-enhanced">
+                <div className="card-header-main">
+                  <div className="order-type-icon-enhanced">
+                    <Monitor size={24} />
+                  </div>
+                  <h3>Software Installation</h3>
+                </div>
               </div>
-              <h3>Software Installation</h3>
-              <p>Professional software setup and installation</p>
-              <div className="card-arrow">→</div>
+              <div className="card-body-enhanced">
+                <p className="card-description">Professional software setup, installation, and configuration</p>
+                <div className="card-features">
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>Licensed software only</span>
+                  </div>
+                  <div className="feature-item">
+                    <CheckCircle size={14} />
+                    <span>System optimization</span>
+                  </div>
+                </div>
+              </div>
+              <div className="card-footer-enhanced">
+                <span className="card-action-text">Select Software Installation</span>
+                <div className="card-arrow-enhanced">→</div>
+              </div>
             </div>
           </div>
         </div>
@@ -1965,128 +4000,181 @@ function CreateOrderView() {
       )}
 
       {step === 2 && orderType === 'Tarpaulin' && (
-        <div className="order-form-step">
-          <div className="repair-form">
-            <div className="form-section">
-              <h3 className="form-section-title">Customer Information</h3>
-              <div className="enhanced-fields-grid">
-                {/* Customer Name */}
-                <div className="enhanced-field">
+        <div className="order-form-step-tarpaulin">
+          <div className="tarpaulin-form-compact">
+            {/* Customer Search Section */}
+            <div className="form-section-compact customer-search-section">
+              <div className="section-header-compact">
+                <div className="section-icon-compact">
+                  <Search size={18} />
+                </div>
+                <h3>Find Existing Customer</h3>
+              </div>
+              <div className="customer-search-wrapper">
+                <div className="customer-search-input-wrapper">
+                  <Search size={16} className="search-icon" />
+                  <input
+                    type="text"
+                    placeholder="Search by name, phone, or email..."
+                    value={customerSearch}
+                    onChange={(e) => {
+                      setCustomerSearch(e.target.value)
+                      setShowCustomerDropdown(true)
+                      if (e.target.value) {
+                        handleCustomerSearch(e.target.value)
+                      } else {
+                        setCustomers([])
+                      }
+                    }}
+                    onFocus={() => {
+                      if (customerSearch) {
+                        setShowCustomerDropdown(true)
+                      }
+                    }}
+                  />
+                  {customerSearch && (
+                    <button
+                      type="button"
+                      className="clear-search-btn"
+                      onClick={() => {
+                        setCustomerSearch('')
+                        setCustomers([])
+                        setShowCustomerDropdown(false)
+                        setSelectedCustomer(null)
+                        setIsNewCustomer(true)
+                        setCustomerOrders([])
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+                {showCustomerDropdown && customers.length > 0 && (
+                  <div className="customer-dropdown">
+                    {customers.map((customer) => (
+                      <div
+                        key={customer.id}
+                        className="customer-dropdown-item"
+                        onClick={() => handleCustomerSelect(customer)}
+                      >
+                        <div className="customer-item-main">
+                          <div className="customer-item-name">{customer.name}</div>
+                          <div className="customer-item-details">
+                            {customer.contactNumber && <span>{customer.contactNumber}</span>}
+                            {customer.email && <span>{customer.email}</span>}
+                          </div>
+                        </div>
+                        <div className="customer-item-stats">
+                          <div className="customer-stat">
+                            <span className="stat-label">Orders:</span>
+                            <span className="stat-value">{customer.totalOrders || 0}</span>
+                          </div>
+                          <div className="customer-stat">
+                            <span className="stat-label">Balance:</span>
+                            <span className="stat-value">₱{parseFloat(customer.totalBalance || 0).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Customer Information Section */}
+            <div className="form-section-compact">
+              <div className="section-header-compact">
+                <div className="section-icon-compact">
+                  <User size={18} />
+                </div>
+                <h3>{isNewCustomer ? 'New Customer Information' : 'Customer Information'}</h3>
+              </div>
+              <div className="form-grid-compact">
+                <div className="form-field-compact">
                   <label>Customer Name *</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <User size={18} />
-                    </div>
+                  <div className="field-input-wrapper">
+                    <User size={16} className="field-icon" />
                     <input
                       type="text"
                       placeholder="Enter customer name"
                       value={tarpaulinData.customerName}
                       onChange={(e) => handleTarpaulinInputChange('customerName', e.target.value)}
-                      className="enhanced-field-input"
+                      disabled={!isNewCustomer}
                     />
                   </div>
                 </div>
                 
-                {/* Contact Number */}
-                <div className="enhanced-field">
+                <div className="form-field-compact">
                   <label>Contact Number *</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Phone size={18} />
-                    </div>
+                  <div className="field-input-wrapper">
+                    <Phone size={16} className="field-icon" />
                     <input
                       type="tel"
                       placeholder="Enter contact number"
                       value={tarpaulinData.contactNumber}
                       onChange={(e) => handleTarpaulinInputChange('contactNumber', e.target.value)}
-                      className="enhanced-field-input"
+                      disabled={!isNewCustomer}
                     />
                   </div>
                 </div>
                 
-                {/* Email Address */}
-                <div className="enhanced-field">
+                <div className="form-field-compact">
                   <label>Email Address</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Mail size={18} />
-                    </div>
+                  <div className="field-input-wrapper">
+                    <Mail size={16} className="field-icon" />
                     <input
                       type="email"
-                      placeholder="Enter email address (optional)"
+                      placeholder="Enter email (optional)"
                       value={tarpaulinData.email}
                       onChange={(e) => handleTarpaulinInputChange('email', e.target.value)}
-                      className="enhanced-field-input"
                     />
                   </div>
                 </div>
                 
-                {/* Business/Organization Name */}
-                <div className="enhanced-field">
-                  <label>Business/Organization Name</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Building2 size={18} />
-                    </div>
+                <div className="form-field-compact">
+                  <label>Business Name</label>
+                  <div className="field-input-wrapper">
+                    <Building2 size={16} className="field-icon" />
                     <input
                       type="text"
                       placeholder="Enter business name (optional)"
                       value={tarpaulinData.businessName}
                       onChange={(e) => handleTarpaulinInputChange('businessName', e.target.value)}
-                      className="enhanced-field-input"
-                    />
-                  </div>
-                </div>
-                
-                {/* Customer Address */}
-                <div className="enhanced-field enhanced-field-full">
-                  <label>Customer Address</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <MapPin size={18} />
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Enter customer address (optional)"
-                      value={tarpaulinData.address}
-                      onChange={(e) => handleTarpaulinInputChange('address', e.target.value)}
-                      className="enhanced-field-input"
                     />
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="form-section">
-              <h3 className="form-section-title">Event Details (Optional)</h3>
-              <div className="enhanced-fields-grid">
-                {/* Event Type */}
-                <div className="enhanced-field">
+            {/* Event & Preferences Section */}
+            <div className="form-section-compact event-preferences-section">
+              <div className="section-header-compact">
+                <div className="section-icon-compact">
+                  <Calendar size={18} />
+                </div>
+                <h3>Event & Preferences</h3>
+              </div>
+              <div className="form-grid-compact">
+                <div className="form-field-compact">
                   <label>Event Type</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <PartyPopper size={18} />
-                    </div>
+                  <div className="field-input-wrapper">
+                    <PartyPopper size={16} className="field-icon" />
                     <input
                       type="text"
-                      placeholder="e.g., Birthday, Wedding, Corporate Event"
+                      placeholder="e.g., Birthday, Wedding"
                       value={tarpaulinData.eventType}
                       onChange={(e) => handleTarpaulinInputChange('eventType', e.target.value)}
-                      className="enhanced-field-input"
                     />
                   </div>
                 </div>
                 
-                {/* Event Date */}
-                <div className="enhanced-field">
+                <div className="form-field-compact">
                   <label>Event Date</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <CalendarCheck size={18} />
-                    </div>
+                  <div className="field-input-wrapper">
+                    <CalendarCheck size={16} className="field-icon" />
                     <input
                       type="text"
-                      placeholder="Click to select date"
+                      placeholder="Select date"
                       value={tarpaulinData.eventDate ? new Date(tarpaulinData.eventDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
                       onFocus={(e) => {
                         e.target.blur();
@@ -2102,26 +4190,17 @@ function CreateOrderView() {
                           e.target.type = 'text';
                         }
                       }}
-                      className="enhanced-field-input"
                     />
                   </div>
                 </div>
-              </div>
-            </div>
-
-            <div className="form-section">
-              <h3 className="form-section-title">Order Preferences</h3>
-              <div className="enhanced-fields-grid">
-                {/* Preferred Pickup Date */}
-                <div className="enhanced-field">
+                
+                <div className="form-field-compact">
                   <label>Preferred Pickup Date</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Truck size={18} />
-                    </div>
+                  <div className="field-input-wrapper">
+                    <Truck size={16} className="field-icon" />
                     <input
                       type="text"
-                      placeholder="Click to select date"
+                      placeholder="Select date"
                       value={tarpaulinData.preferredDeliveryDate ? new Date(tarpaulinData.preferredDeliveryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
                       onFocus={(e) => {
                         e.target.blur();
@@ -2138,8 +4217,31 @@ function CreateOrderView() {
                           e.target.type = 'text';
                         }
                       }}
-                      className="enhanced-field-input"
                     />
+                  </div>
+                </div>
+
+                {/* Rush Order Toggle */}
+                <div className="form-field-compact rush-order-field">
+                  <label>Rush Order</label>
+                  <div className="rush-order-toggle-wrapper">
+                    <div className="rush-order-toggle-content">
+                      <div className="rush-order-toggle-icon">
+                        <Clock size={16} />
+                      </div>
+                      <div className="rush-order-toggle-info">
+                        <div className="rush-order-toggle-title">Priority Processing</div>
+                        <div className="rush-order-toggle-description">Urgent order handling</div>
+                      </div>
+                    </div>
+                    <label className="rush-order-toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={tarpaulinData.rushOrder}
+                        onChange={(e) => handleTarpaulinInputChange('rushOrder', e.target.checked)}
+                      />
+                      <span className="rush-order-toggle-slider"></span>
+                    </label>
                   </div>
                 </div>
               </div>
@@ -2149,242 +4251,209 @@ function CreateOrderView() {
       )}
 
       {step === 2 && orderType === 'Sublimation' && (
-        <div className="order-form-step">
-          <div className="repair-form">
-            <div className="form-section">
-              <h3 className="form-section-title">Customer Information</h3>
-              <div className="enhanced-fields-grid">
-                {/* Customer Name */}
-                <div className="enhanced-field">
+        <div className="order-form-step-tarpaulin">
+          <div className="tarpaulin-form-compact">
+            {/* Customer Search Section */}
+            <div className="form-section-compact customer-search-section">
+              <div className="section-header-compact">
+                <div className="section-icon-compact">
+                  <Search size={18} />
+                </div>
+                <h3>Find Existing Customer</h3>
+              </div>
+              <div className="customer-search-wrapper">
+                <div className="customer-search-input-wrapper">
+                  <Search size={16} className="search-icon" />
+                  <input
+                    type="text"
+                    placeholder="Search by name, phone, or email..."
+                    value={customerSearch}
+                    onChange={(e) => {
+                      setCustomerSearch(e.target.value)
+                      setShowCustomerDropdown(true)
+                      if (e.target.value) {
+                        handleCustomerSearch(e.target.value)
+                      } else {
+                        setCustomers([])
+                      }
+                    }}
+                    onFocus={() => {
+                      if (customerSearch) {
+                        setShowCustomerDropdown(true)
+                      }
+                    }}
+                  />
+                  {customerSearch && (
+                    <button
+                      type="button"
+                      className="clear-search-btn"
+                      onClick={() => {
+                        setCustomerSearch('')
+                        setCustomers([])
+                        setShowCustomerDropdown(false)
+                        setSelectedCustomer(null)
+                        setIsNewCustomer(true)
+                        setCustomerOrders([])
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+                {showCustomerDropdown && customers.length > 0 && (
+                  <div className="customer-dropdown">
+                    {customers.map((customer) => (
+                      <div
+                        key={customer.id}
+                        className="customer-dropdown-item"
+                        onClick={() => handleCustomerSelect(customer)}
+                      >
+                        <div className="customer-item-main">
+                          <div className="customer-item-name">{customer.name}</div>
+                          <div className="customer-item-details">
+                            {customer.contactNumber && <span>{customer.contactNumber}</span>}
+                            {customer.email && <span>{customer.email}</span>}
+                          </div>
+                        </div>
+                        <div className="customer-item-stats">
+                          <div className="customer-stat">
+                            <span className="stat-label">Orders:</span>
+                            <span className="stat-value">{customer.totalOrders || 0}</span>
+                          </div>
+                          <div className="customer-stat">
+                            <span className="stat-label">Balance:</span>
+                            <span className="stat-value">₱{parseFloat(customer.totalBalance || 0).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Customer Information Section */}
+            <div className="form-section-compact">
+              <div className="section-header-compact">
+                <div className="section-icon-compact">
+                  <User size={18} />
+                </div>
+                <h3>{isNewCustomer ? 'New Customer Information' : 'Customer Information'}</h3>
+              </div>
+              <div className="form-grid-compact">
+                <div className="form-field-compact">
                   <label>Customer Name *</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <User size={18} />
-                    </div>
+                  <div className="field-input-wrapper">
+                    <User size={16} className="field-icon" />
                     <input
                       type="text"
                       placeholder="Enter customer name"
                       value={sublimationData.customerName}
                       onChange={(e) => handleSublimationInputChange('customerName', e.target.value)}
-                      className="enhanced-field-input"
+                      disabled={!isNewCustomer}
                     />
                   </div>
                 </div>
                 
-                {/* Contact Number */}
-                <div className="enhanced-field">
+                <div className="form-field-compact">
                   <label>Contact Number *</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Phone size={18} />
-                    </div>
+                  <div className="field-input-wrapper">
+                    <Phone size={16} className="field-icon" />
                     <input
                       type="tel"
                       placeholder="Enter contact number"
                       value={sublimationData.contactNumber}
                       onChange={(e) => handleSublimationInputChange('contactNumber', e.target.value)}
-                      className="enhanced-field-input"
+                      disabled={!isNewCustomer}
                     />
                   </div>
                 </div>
                 
-                {/* Email Address */}
-                <div className="enhanced-field">
+                <div className="form-field-compact">
                   <label>Email Address</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Mail size={18} />
-                    </div>
+                  <div className="field-input-wrapper">
+                    <Mail size={16} className="field-icon" />
                     <input
                       type="email"
-                      placeholder="Enter email address (optional)"
+                      placeholder="Enter email (optional)"
                       value={sublimationData.email}
                       onChange={(e) => handleSublimationInputChange('email', e.target.value)}
-                      className="enhanced-field-input"
                     />
                   </div>
                 </div>
                 
-                {/* Business/Organization Name */}
-                <div className="enhanced-field">
-                  <label>Business/Organization Name</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Building2 size={18} />
-                    </div>
+                <div className="form-field-compact">
+                  <label>Business Name</label>
+                  <div className="field-input-wrapper">
+                    <Building2 size={16} className="field-icon" />
                     <input
                       type="text"
                       placeholder="Enter business name (optional)"
                       value={sublimationData.businessName}
                       onChange={(e) => handleSublimationInputChange('businessName', e.target.value)}
-                      className="enhanced-field-input"
-                    />
-                  </div>
-                </div>
-                
-                {/* Customer Address */}
-                <div className="enhanced-field enhanced-field-full">
-                  <label>Customer Address</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <MapPin size={18} />
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Enter customer address (optional)"
-                      value={sublimationData.address}
-                      onChange={(e) => handleSublimationInputChange('address', e.target.value)}
-                      className="enhanced-field-input"
                     />
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="form-section">
-              <h3 className="form-section-title">Order Information</h3>
-              <div className="enhanced-fields-grid">
-                {/* Pickup Date */}
-                <div className="enhanced-field">
+            {/* Event & Preferences Section */}
+            <div className="form-section-compact event-preferences-section">
+              <div className="section-header-compact">
+                <div className="section-icon-compact">
+                  <Calendar size={18} />
+                </div>
+                <h3>Order & Preferences</h3>
+              </div>
+              <div className="form-grid-compact">
+                <div className="form-field-compact">
                   <label>Pickup Date</label>
-                  <div className="enhanced-field-wrapper" style={{ position: 'relative' }}>
-                    <div className="enhanced-field-icon">
-                      <Calendar size={18} />
-                    </div>
+                  <div className="field-input-wrapper">
+                    <Truck size={16} className="field-icon" />
                     <input
                       type="text"
-                      placeholder="Click to select date"
+                      placeholder="Select date"
                       value={sublimationData.pickupDate ? new Date(sublimationData.pickupDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
-                      onClick={() => setShowCalendar(true)}
-                      readOnly
-                      className="enhanced-field-input"
-                      style={{ cursor: 'pointer' }}
+                      onFocus={(e) => {
+                        e.target.blur();
+                        e.target.type = 'date';
+                        e.target.min = new Date().toISOString().split('T')[0];
+                        setTimeout(() => e.target.showPicker?.(), 0);
+                      }}
+                      onChange={(e) => {
+                        handleSublimationInputChange('pickupDate', e.target.value);
+                        e.target.type = 'text';
+                      }}
+                      onBlur={(e) => {
+                        if (!sublimationData.pickupDate) {
+                          e.target.type = 'text';
+                        }
+                      }}
                     />
-                    
-                    {/* Custom Calendar Modal */}
-                    {showCalendar && (
-                      <>
-                        <div className="calendar-backdrop" onClick={() => setShowCalendar(false)} />
-                        <div className="custom-calendar">
-                          <div className="calendar-header">
-                            <button type="button" onClick={() => changeMonth(-1)} className="calendar-nav-btn">
-                              ←
-                            </button>
-                            <div className="calendar-title">
-                              {currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                            </div>
-                            <button type="button" onClick={() => changeMonth(1)} className="calendar-nav-btn">
-                              →
-                            </button>
-                          </div>
-                          <div className="calendar-weekdays">
-                            <div>Sun</div>
-                            <div>Mon</div>
-                            <div>Tue</div>
-                            <div>Wed</div>
-                            <div>Thu</div>
-                            <div>Fri</div>
-                            <div>Sat</div>
-                          </div>
-                          <div className="calendar-days">
-                            {(() => {
-                              const { daysInMonth, startingDayOfWeek, year, month } = getDaysInMonth(currentMonth)
-                              const days = []
-                              const today = new Date()
-                              today.setHours(0, 0, 0, 0)
-                              
-                              // Empty cells for days before month starts
-                              for (let i = 0; i < startingDayOfWeek; i++) {
-                                days.push(<div key={`empty-${i}`} className="calendar-day empty"></div>)
-                              }
-                              
-                              // Days of the month
-                              for (let day = 1; day <= daysInMonth; day++) {
-                                const date = new Date(year, month, day)
-                                date.setHours(0, 0, 0, 0)
-                                const isPast = date < today
-                                const isSelected = selectedDate && 
-                                  date.getDate() === selectedDate.getDate() &&
-                                  date.getMonth() === selectedDate.getMonth() &&
-                                  date.getFullYear() === selectedDate.getFullYear()
-                                
-                                days.push(
-                                  <div
-                                    key={day}
-                                    className={`calendar-day ${isPast ? 'past' : ''} ${isSelected ? 'selected' : ''}`}
-                                    onClick={() => !isPast && handleDateSelect(date)}
-                                  >
-                                    {day}
-                                  </div>
-                                )
-                              }
-                              
-                              return days
-                            })()}
-                          </div>
-                        </div>
-                      </>
-                    )}
                   </div>
                 </div>
 
-                {/* Priority Level */}
-                <div className="enhanced-field">
-                  <label>Priority Level</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <AlertCircle size={18} />
+                {/* Rush Order Toggle */}
+                <div className="form-field-compact rush-order-field">
+                  <label>Rush Order</label>
+                  <div className="rush-order-toggle-wrapper">
+                    <div className="rush-order-toggle-content">
+                      <div className="rush-order-toggle-icon">
+                        <Clock size={16} />
+                      </div>
+                      <div className="rush-order-toggle-info">
+                        <div className="rush-order-toggle-title">Priority Processing</div>
+                        <div className="rush-order-toggle-description">Urgent order handling</div>
+                      </div>
                     </div>
-                    <select
-                      value={sublimationData.priorityLevel}
-                      onChange={(e) => handleSublimationInputChange('priorityLevel', e.target.value)}
-                      className="enhanced-field-input"
-                    >
-                      <option value="Normal">Normal</option>
-                      <option value="High">High</option>
-                      <option value="Urgent">Urgent</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Product Category */}
-                <div className="enhanced-field">
-                  <label>Product Category</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Package size={18} />
-                    </div>
-                    <select
-                      value={sublimationData.productCategory}
-                      onChange={(e) => handleSublimationInputChange('productCategory', e.target.value)}
-                      className="enhanced-field-input"
-                    >
-                      <option value="">Select Category</option>
-                      <option value="Apparel">Apparel</option>
-                      <option value="Mugs">Mugs</option>
-                      <option value="Tumblers">Tumblers</option>
-                      <option value="Phone Cases">Phone Cases</option>
-                      <option value="Keychains">Keychains</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Delivery Method */}
-                <div className="enhanced-field">
-                  <label>Delivery Method</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Truck size={18} />
-                    </div>
-                    <select
-                      value={sublimationData.deliveryMethod}
-                      onChange={(e) => handleSublimationInputChange('deliveryMethod', e.target.value)}
-                      className="enhanced-field-input"
-                    >
-                      <option value="Pickup">Pickup</option>
-                      <option value="Delivery">Delivery</option>
-                    </select>
+                    <label className="rush-order-toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={sublimationData.rushOrder}
+                        onChange={(e) => handleSublimationInputChange('rushOrder', e.target.checked)}
+                      />
+                      <span className="rush-order-toggle-slider"></span>
+                    </label>
                   </div>
                 </div>
               </div>
@@ -2548,340 +4617,363 @@ function CreateOrderView() {
       )}
 
       {step === 3 && orderType === 'Tarpaulin' && (
-        <div className="order-form-step">
-          <div className="repair-form">
-            <div className="form-section">
-              <h3 className="form-section-title">Order Details</h3>
-              <div className="enhanced-fields-grid">
-                {/* Width */}
-                <div className="enhanced-field">
-                  <label>Width (ft) *</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Maximize2 size={18} />
+        <div className="order-form-step-tarpaulin">
+          <div className="tarpaulin-form-compact">
+            {/* Row Container for Order Dimensions and Assigned Graphic Artist */}
+            <div className="step3-sections-row">
+              {/* Order Dimensions Section */}
+              <div className="form-section-compact">
+                <div className="section-header-compact">
+                  <div className="section-icon-compact">
+                    <Maximize2 size={18} />
+                  </div>
+                  <h3>Order Dimensions</h3>
+                </div>
+                <div className="form-grid-compact">
+                  <div className="form-field-compact">
+                    <label>Width (ft) *</label>
+                    <div className="field-input-wrapper">
+                      <Maximize2 size={16} className="field-icon" />
+                      <input
+                        type="number"
+                        placeholder="0.0"
+                        value={tarpaulinData.width}
+                        onChange={(e) => handleTarpaulinInputChange('width', e.target.value)}
+                        min="1"
+                        step="0.5"
+                      />
+                      <span className="field-unit">ft</span>
                     </div>
-                    <input
-                      type="number"
-                      placeholder="0.0"
-                      value={tarpaulinData.width}
-                      onChange={(e) => handleTarpaulinInputChange('width', e.target.value)}
-                      min="1"
-                      step="0.5"
-                      className="enhanced-field-input"
-                    />
-                    <span className="enhanced-field-unit">ft</span>
+                  </div>
+                  
+                  <div className="form-field-compact">
+                    <label>Height (ft) *</label>
+                    <div className="field-input-wrapper">
+                      <Maximize2 size={16} className="field-icon" />
+                      <input
+                        type="number"
+                        placeholder="0.0"
+                        value={tarpaulinData.height}
+                        onChange={(e) => handleTarpaulinInputChange('height', e.target.value)}
+                        min="1"
+                        step="0.5"
+                      />
+                      <span className="field-unit">ft</span>
+                    </div>
+                  </div>
+                  
+                  <div className="form-field-compact">
+                    <label>Orientation *</label>
+                    <div className="field-input-wrapper">
+                      <RotateCw size={16} className="field-icon" />
+                      <select
+                        value={tarpaulinData.orientation}
+                        onChange={(e) => handleTarpaulinInputChange('orientation', e.target.value)}
+                      >
+                        <option value="Landscape">Landscape</option>
+                        <option value="Portrait">Portrait</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div className="form-field-compact">
+                    <label>Quantity *</label>
+                    <div className="field-input-wrapper">
+                      <Hash size={16} className="field-icon" />
+                      <input
+                        type="number"
+                        placeholder="1"
+                        value={tarpaulinData.quantity}
+                        onChange={(e) => handleTarpaulinInputChange('quantity', e.target.value)}
+                        min="1"
+                      />
+                      <span className="field-unit">pc(s)</span>
+                    </div>
                   </div>
                 </div>
-                
-                {/* Height */}
-                <div className="enhanced-field">
-                  <label>Height (ft) *</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Maximize2 size={18} />
-                    </div>
-                    <input
-                      type="number"
-                      placeholder="0.0"
-                      value={tarpaulinData.height}
-                      onChange={(e) => handleTarpaulinInputChange('height', e.target.value)}
-                      min="1"
-                      step="0.5"
-                      className="enhanced-field-input"
-                    />
-                    <span className="enhanced-field-unit">ft</span>
+              </div>
+
+              {/* Graphic Artist Selection Section */}
+              <div className="form-section-compact artist-section-compact">
+                <div className="section-header-compact">
+                  <div className="section-icon-compact">
+                    <User size={18} />
                   </div>
+                  <h3>Assigned Graphic Artist</h3>
                 </div>
-                
-                {/* Orientation */}
-                <div className="enhanced-field">
-                  <label>Orientation *</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <RotateCw size={18} />
+                <div className="form-grid-compact">
+                  <div className="form-field-compact full-width">
+                    <label>Select Artist/Employee *</label>
+                    <div className="field-input-wrapper" style={{ position: 'relative' }}>
+                      <User size={16} className="field-icon" />
+                      <input
+                        type="text"
+                        placeholder="Type to search employee..."
+                        value={tarpaulinArtistSearch}
+                        onChange={(e) => {
+                          setTarpaulinArtistSearch(e.target.value)
+                          setShowTarpaulinArtistDropdown(true)
+                        }}
+                        onFocus={() => setShowTarpaulinArtistDropdown(true)}
+                        style={{ paddingRight: '40px' }}
+                      />
+                      
+                      {/* Custom Dropdown */}
+                      {showTarpaulinArtistDropdown && (
+                        <>
+                          <div 
+                            className="artist-dropdown-backdrop" 
+                            onClick={() => setShowTarpaulinArtistDropdown(false)}
+                          />
+                          <div className="artist-dropdown">
+                            {employees.length === 0 ? (
+                              <div className="artist-dropdown-item" style={{ padding: '12px', textAlign: 'center', color: '#999999' }}>
+                                Loading employees...
+                              </div>
+                            ) : filteredTarpaulinArtists.length > 0 ? (
+                              filteredTarpaulinArtists.map((employee) => (
+                                <div
+                                  key={employee.id}
+                                  className="artist-dropdown-item"
+                                  onClick={() => handleTarpaulinArtistSelect(employee.name)}
+                                >
+                                  <div className="artist-dropdown-info">
+                                    <span className="artist-dropdown-name">{employee.name}</span>
+                                    <span className="artist-dropdown-workload">Employee ID: {employee.id}</span>
+                                  </div>
+                                  <span className="artist-dropdown-status available">
+                                    Available
+                                  </span>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="artist-dropdown-item" style={{ padding: '12px', textAlign: 'center', color: '#999999' }}>
+                                No employees found
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
-                    <select
-                      value={tarpaulinData.orientation}
-                      onChange={(e) => handleTarpaulinInputChange('orientation', e.target.value)}
-                      className="enhanced-field-select"
-                    >
-                      <option value="Landscape">Landscape</option>
-                      <option value="Portrait">Portrait</option>
-                    </select>
-                  </div>
-                </div>
-                
-                {/* Quantity */}
-                <div className="enhanced-field">
-                  <label>Quantity *</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <Hash size={18} />
-                    </div>
-                    <input
-                      type="number"
-                      placeholder="1"
-                      value={tarpaulinData.quantity}
-                      onChange={(e) => handleTarpaulinInputChange('quantity', e.target.value)}
-                      min="1"
-                      className="enhanced-field-input"
-                    />
-                    <span className="enhanced-field-unit">pc(s)</span>
+                    {tarpaulinData.assignedArtist && (
+                      <div style={{ marginTop: '6px', padding: '6px', background: '#1a1a1a', borderRadius: '4px', fontSize: '11px' }}>
+                        <strong>Selected:</strong> {tarpaulinData.assignedArtist}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Graphic Artist Info Card */}
-            <div className="form-section">
-              <div className="artist-info-card">
-                <div className="artist-header">
-                  <div className="artist-avatar">
-                    <User size={40} />
+            {/* Graphic Artist Profile Section */}
+            {tarpaulinData.assignedArtist && getSelectedTarpaulinEmployee() && (
+              <div className="form-section-compact artist-profile-section-compact">
+                <div className="section-header-compact">
+                  <div className="section-icon-compact">
+                    <User size={18} />
                   </div>
-                  <div className="artist-main-info">
-                    <h3 className="artist-name">John Martinez</h3>
-                    <p className="artist-role">Senior Graphic Artist</p>
+                  <h3>Artist Profile</h3>
+                </div>
+                <div className="artist-header-compact">
+                  <div className="artist-avatar-compact">
+                    <User size={32} />
+                  </div>
+                  <div className="artist-main-info-compact">
+                    <h3 className="artist-name-compact">{getSelectedTarpaulinEmployee()?.name}</h3>
+                    <p className="artist-role-compact">Graphic Artist</p>
+                  </div>
+                  <div className="artist-status-compact">
+                    <CheckCircle size={14} />
+                    <span>Available</span>
                   </div>
                 </div>
-
-                <div className="artist-details">
-                  <div className="artist-detail-item">
-                    <div className="artist-detail-icon">
-                      <Phone size={18} />
+                
+                <div className="artist-details-compact">
+                  <div className="artist-detail-item-compact">
+                    <div className="artist-detail-icon-compact">
+                      <Hash size={14} />
                     </div>
-                    <div className="artist-detail-content">
-                      <div className="artist-detail-label">Contact</div>
-                      <div className="artist-detail-value">+63 912 345 6789</div>
-                    </div>
-                  </div>
-
-                  <div className="artist-detail-item">
-                    <div className="artist-detail-icon">
-                      <Mail size={18} />
-                    </div>
-                    <div className="artist-detail-content">
-                      <div className="artist-detail-label">Email</div>
-                      <div className="artist-detail-value">john.martinez@ironwolf.com</div>
+                    <div className="artist-detail-content-compact">
+                      <div className="artist-detail-label-compact">Employee ID</div>
+                      <div className="artist-detail-value-compact">#{getSelectedTarpaulinEmployee()?.id}</div>
                     </div>
                   </div>
-
-                  <div className="artist-detail-item">
-                    <div className="artist-detail-icon">
-                      <Briefcase size={18} />
+                  
+                  <div className="artist-detail-item-compact">
+                    <div className="artist-detail-icon-compact">
+                      <Package size={14} />
                     </div>
-                    <div className="artist-detail-content">
-                      <div className="artist-detail-label">Experience</div>
-                      <div className="artist-detail-value">5+ Years</div>
+                    <div className="artist-detail-content-compact">
+                      <div className="artist-detail-label-compact">Current Workload</div>
+                      <div className="artist-detail-value-compact">
+                        {selectedEmployeeOrderCount} Active Order{selectedEmployeeOrderCount !== 1 ? 's' : ''}
+                      </div>
                     </div>
                   </div>
-
-                  <div className="artist-detail-item">
-                    <div className="artist-detail-icon">
-                      <CheckCircle size={18} />
+                  
+                  <div className="artist-detail-item-compact">
+                    <div className="artist-detail-icon-compact">
+                      <CheckCircle size={14} />
                     </div>
-                    <div className="artist-detail-content">
-                      <div className="artist-detail-label">Status</div>
-                      <div className="artist-detail-value">Available</div>
+                    <div className="artist-detail-content-compact">
+                      <div className="artist-detail-label-compact">Status</div>
+                      <div className="artist-detail-value-compact">Available</div>
                     </div>
                   </div>
-                </div>
-
-                <div className="artist-workload-details">
-                  <h4 className="workload-title">Current Workload</h4>
-                  <div className="workload-list">
-                    <div className="workload-item">
-                      <div className="workload-item-icon">
-                        <Package size={18} />
-                      </div>
-                      <div className="workload-item-content">
-                        <div className="workload-item-name">Tarpaulin Order #1234</div>
-                        <div className="workload-item-status">In Progress - 60% Complete</div>
-                      </div>
+                  
+                  <div className="artist-detail-item-compact">
+                    <div className="artist-detail-icon-compact">
+                      <Paintbrush size={14} />
                     </div>
-
-                    <div className="workload-item">
-                      <div className="workload-item-icon">
-                        <Palette size={18} />
-                      </div>
-                      <div className="workload-item-content">
-                        <div className="workload-item-name">Sublimation Order #1235</div>
-                        <div className="workload-item-status">Pending Review</div>
-                      </div>
-                    </div>
-
-                    <div className="workload-item">
-                      <div className="workload-item-icon">
-                        <Package size={18} />
-                      </div>
-                      <div className="workload-item-content">
-                        <div className="workload-item-name">Banner Design #1236</div>
-                        <div className="workload-item-status">Design Phase</div>
-                      </div>
+                    <div className="artist-detail-content-compact">
+                      <div className="artist-detail-label-compact">Specialization</div>
+                      <div className="artist-detail-value-compact">Graphic Design</div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
 
       {step === 3 && orderType === 'Sublimation' && (
-        <div className="order-form-step">
-          <div className="repair-form">
-            <div className="form-section">
-              <h3 className="form-section-title">Graphic Artist Selection</h3>
-              <div className="artist-selection-row">
-                {/* Assigned Graphic Artist with Search */}
-                <div className="enhanced-field artist-search-field">
-                  <label>Assigned Graphic Artist *</label>
-                  <div className="enhanced-field-wrapper" style={{ position: 'relative' }}>
-                    <div className="enhanced-field-icon">
-                      <User size={18} />
-                    </div>
+        <div className="order-form-step-tarpaulin">
+          <div className="tarpaulin-form-compact">
+            {/* Assigned Graphic Artist Section - Full Width */}
+            <div className="form-section-compact artist-section-compact" style={{ width: '100%' }}>
+              <div className="section-header-compact">
+                <div className="section-icon-compact">
+                  <User size={18} />
+                </div>
+                <h3>Assigned Graphic Artist</h3>
+              </div>
+                  <div className="form-grid-compact">
+                <div className="form-field-compact full-width">
+                  <label>Select Artist/Employee *</label>
+                  <div className="field-input-wrapper" style={{ position: 'relative' }}>
+                    <User size={16} className="field-icon" />
                     <input
                       type="text"
-                      placeholder="Type to search artist..."
+                      placeholder="Type to search employee..."
                       value={artistSearch}
                       onChange={(e) => {
                         setArtistSearch(e.target.value)
                         setShowArtistDropdown(true)
                       }}
                       onFocus={() => setShowArtistDropdown(true)}
-                      className="enhanced-field-input"
-                      autoComplete="off"
+                      style={{ paddingRight: '40px' }}
                     />
                     
                     {/* Custom Dropdown */}
-                    {showArtistDropdown && filteredArtists.length > 0 && (
+                    {showArtistDropdown && (
                       <>
                         <div 
                           className="artist-dropdown-backdrop" 
                           onClick={() => setShowArtistDropdown(false)}
                         />
                         <div className="artist-dropdown">
-                          {filteredArtists.map((artist) => (
-                            <div
-                              key={artist.id}
-                              className={`artist-dropdown-item ${artist.status === 'Not Available' ? 'unavailable' : ''}`}
-                              onClick={() => handleArtistSelect(artist.name)}
-                            >
-                              <div className="artist-dropdown-info">
-                                <span className="artist-dropdown-name">{artist.name}</span>
-                                <span className="artist-dropdown-workload">{artist.workload} orders</span>
-                              </div>
-                              <span className={`artist-dropdown-status ${artist.status === 'Available' ? 'available' : 'not-available'}`}>
-                                {artist.status}
-                              </span>
+                          {employees.length === 0 ? (
+                            <div className="artist-dropdown-item" style={{ padding: '12px', textAlign: 'center', color: '#999999' }}>
+                              Loading employees...
                             </div>
-                          ))}
+                          ) : filteredArtists.length > 0 ? (
+                            filteredArtists.map((employee) => (
+                              <div
+                                key={employee.id}
+                                className="artist-dropdown-item"
+                                onClick={() => handleArtistSelect(employee.name)}
+                              >
+                                <div className="artist-dropdown-info">
+                                  <span className="artist-dropdown-name">{employee.name}</span>
+                                  <span className="artist-dropdown-workload">Employee ID: {employee.id}</span>
+                                </div>
+                                <span className="artist-dropdown-status available">
+                                  Available
+                                </span>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="artist-dropdown-item" style={{ padding: '12px', textAlign: 'center', color: '#999999' }}>
+                              No employees found
+                            </div>
+                          )}
                         </div>
                       </>
                     )}
                   </div>
-                </div>
-
-                {/* Employee Status */}
-                <div className="enhanced-field employee-status-field">
-                  <label>Employee Status</label>
-                  <div className="enhanced-field-wrapper">
-                    <div className="enhanced-field-icon">
-                      <CheckCircle size={18} />
+                  {sublimationData.assignedArtist && (
+                    <div style={{ marginTop: '6px', padding: '6px', background: '#1a1a1a', borderRadius: '4px', fontSize: '11px' }}>
+                      <strong>Selected:</strong> {sublimationData.assignedArtist}
                     </div>
-                    <div className={`status-badge ${sublimationData.assignedArtist ? (getArtistStatus(sublimationData.assignedArtist) === 'Available' ? 'status-available' : 'status-unavailable') : 'status-none'}`}>
-                      {sublimationData.assignedArtist ? getArtistStatus(sublimationData.assignedArtist) : 'Not Selected'}
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Graphic Artist Info Card */}
-            {sublimationData.assignedArtist && (
-              <div className="form-section artist-info-section">
-                <h3 className="form-section-title">Artist Information</h3>
-                <div className="artist-info-card">
-                  <div className="artist-header">
-                    <div className="artist-avatar">
-                      <User size={48} />
+            {/* Graphic Artist Profile Section */}
+            {sublimationData.assignedArtist && getSelectedTarpaulinEmployee() && (
+              <div className="form-section-compact artist-profile-section-compact">
+                <div className="section-header-compact">
+                  <div className="section-icon-compact">
+                    <User size={18} />
+                  </div>
+                  <h3>Artist Profile</h3>
+                </div>
+                <div className="artist-header-compact">
+                  <div className="artist-avatar-compact">
+                    <User size={32} />
+                  </div>
+                  <div className="artist-main-info-compact">
+                    <h3 className="artist-name-compact">{getSelectedTarpaulinEmployee()?.name}</h3>
+                    <p className="artist-role-compact">Graphic Artist</p>
+                  </div>
+                  <div className="artist-status-compact">
+                    <CheckCircle size={14} />
+                    <span>Available</span>
+                  </div>
+                </div>
+                
+                <div className="artist-details-compact">
+                  <div className="artist-detail-item-compact">
+                    <div className="artist-detail-icon-compact">
+                      <Hash size={14} />
                     </div>
-                    <div className="artist-main-info">
-                      <h3 className="artist-name">{sublimationData.assignedArtist}</h3>
-                      <p className="artist-role">Graphic Designer</p>
+                    <div className="artist-detail-content-compact">
+                      <div className="artist-detail-label-compact">Employee ID</div>
+                      <div className="artist-detail-value-compact">#{getSelectedTarpaulinEmployee()?.id}</div>
                     </div>
                   </div>
                   
-                  <div className="artist-details">
-                    <div className="artist-detail-item">
-                      <div className="artist-detail-icon">
-                        <Phone size={18} />
-                      </div>
-                      <div className="artist-detail-content">
-                        <div className="artist-detail-label">Contact Number</div>
-                        <div className="artist-detail-value">+63 912 345 6789</div>
-                      </div>
+                  <div className="artist-detail-item-compact">
+                    <div className="artist-detail-icon-compact">
+                      <Package size={14} />
                     </div>
-                    
-                    <div className="artist-detail-item">
-                      <div className="artist-detail-icon">
-                        <Briefcase size={18} />
-                      </div>
-                      <div className="artist-detail-content">
-                        <div className="artist-detail-label">Current Workload</div>
-                        <div className="artist-detail-value">5 Active Orders</div>
+                    <div className="artist-detail-content-compact">
+                      <div className="artist-detail-label-compact">Current Workload</div>
+                      <div className="artist-detail-value-compact">
+                        {selectedEmployeeOrderCount} Active Order{selectedEmployeeOrderCount !== 1 ? 's' : ''}
                       </div>
                     </div>
                   </div>
                   
-                  <div className="artist-workload-details">
-                    <h4 className="workload-title">Current Projects</h4>
-                    <div className="workload-list">
-                      <div className="workload-item">
-                        <div className="workload-item-icon">
-                          <Package size={16} />
-                        </div>
-                        <div className="workload-item-content">
-                          <div className="workload-item-name">T-Shirt Design - Corporate Event</div>
-                          <div className="workload-item-status">In Progress</div>
-                        </div>
-                      </div>
-                      <div className="workload-item">
-                        <div className="workload-item-icon">
-                          <Package size={16} />
-                        </div>
-                        <div className="workload-item-content">
-                          <div className="workload-item-name">Mug Design - Birthday Party</div>
-                          <div className="workload-item-status">In Progress</div>
-                        </div>
-                      </div>
-                      <div className="workload-item">
-                        <div className="workload-item-icon">
-                          <Package size={16} />
-                        </div>
-                        <div className="workload-item-content">
-                          <div className="workload-item-name">Tumbler Design - Wedding</div>
-                          <div className="workload-item-status">Pending Review</div>
-                        </div>
-                      </div>
-                      <div className="workload-item">
-                        <div className="workload-item-icon">
-                          <Package size={16} />
-                        </div>
-                        <div className="workload-item-content">
-                          <div className="workload-item-name">Phone Case - Personal</div>
-                          <div className="workload-item-status">Queued</div>
-                        </div>
-                      </div>
-                      <div className="workload-item">
-                        <div className="workload-item-icon">
-                          <Package size={16} />
-                        </div>
-                        <div className="workload-item-content">
-                          <div className="workload-item-name">Keychain Design - School Event</div>
-                          <div className="workload-item-status">Queued</div>
-                        </div>
-                      </div>
+                  <div className="artist-detail-item-compact">
+                    <div className="artist-detail-icon-compact">
+                      <CheckCircle size={14} />
+                    </div>
+                    <div className="artist-detail-content-compact">
+                      <div className="artist-detail-label-compact">Status</div>
+                      <div className="artist-detail-value-compact">Available</div>
+                    </div>
+                  </div>
+                  
+                  <div className="artist-detail-item-compact">
+                    <div className="artist-detail-icon-compact">
+                      <Paintbrush size={14} />
+                    </div>
+                    <div className="artist-detail-content-compact">
+                      <div className="artist-detail-label-compact">Specialization</div>
+                      <div className="artist-detail-value-compact">Graphic Design</div>
                     </div>
                   </div>
                 </div>
@@ -2892,298 +4984,206 @@ function CreateOrderView() {
       )}
 
       {step === 4 && orderType === 'Tarpaulin' && (
-        <div className="order-form-step">
-          <div className="horizontal-container">
-            {/* Order Summary Section */}
-            <div className="form-section summary-section-enhanced">
-              <h3 className="form-section-title">Order Summary</h3>
-              
-              {/* Rush Order Toggle - Full Width at Top */}
-              <div className="rush-order-container">
-                <label className="rush-order-toggle">
-                  <input
-                    type="checkbox"
-                    checked={tarpaulinData.rushOrder}
-                    onChange={(e) => handleTarpaulinInputChange('rushOrder', e.target.checked)}
-                  />
-                  <div className="rush-toggle-slider"></div>
-                  <div className="rush-toggle-content">
-                    <div className="rush-toggle-info">
-                      <span className="rush-toggle-title">Rush Order</span>
-                      <span className="rush-toggle-subtitle">Priority processing</span>
-                    </div>
-                  </div>
-                </label>
-              </div>
-
-              {/* Order Details Grid */}
-              <div className="summary-enhanced-grid">
-                <div className="summary-enhanced-item summary-enhanced-item-full">
-                  <div className="summary-enhanced-icon">
-                    <User size={18} />
-                  </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Customer</div>
-                    <div className="summary-enhanced-value">{tarpaulinData.customerName || '-'}</div>
-                  </div>
-                </div>
-                <div className="summary-enhanced-item summary-enhanced-item-full">
-                  <div className="summary-enhanced-icon">
-                    <Phone size={18} />
-                  </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Contact</div>
-                    <div className="summary-enhanced-value">{tarpaulinData.contactNumber || '-'}</div>
-                  </div>
-                </div>
-                <div className="summary-enhanced-item">
-                  <div className="summary-enhanced-icon">
-                    <Mail size={18} />
-                  </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Email</div>
-                    <div className="summary-enhanced-value">{tarpaulinData.email || '-'}</div>
-                  </div>
-                </div>
-                <div className="summary-enhanced-item">
-                  <div className="summary-enhanced-icon">
-                    <MapPin size={18} />
-                  </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Address</div>
-                    <div className="summary-enhanced-value">{tarpaulinData.address || '-'}</div>
-                  </div>
-                </div>
-                <div className="summary-enhanced-item">
-                  <div className="summary-enhanced-icon">
-                    <PartyPopper size={18} />
-                  </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Event Type</div>
-                    <div className="summary-enhanced-value">{tarpaulinData.eventType || '-'}</div>
-                  </div>
-                </div>
-                <div className="summary-enhanced-item">
-                  <div className="summary-enhanced-icon">
-                    <CalendarCheck size={18} />
-                  </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Event Date</div>
-                    <div className="summary-enhanced-value">
-                      {tarpaulinData.eventDate 
-                        ? new Date(tarpaulinData.eventDate).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric'
-                          })
-                        : '-'}
-                    </div>
-                  </div>
-                </div>
-                <div className="summary-enhanced-item">
-                  <div className="summary-enhanced-icon">
-                    <Truck size={18} />
-                  </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Pickup Date</div>
-                    <div className="summary-enhanced-value">
-                      {tarpaulinData.preferredDeliveryDate 
-                        ? new Date(tarpaulinData.preferredDeliveryDate).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric'
-                          })
-                        : '-'}
-                    </div>
-                  </div>
-                </div>
-                <div className="summary-enhanced-item">
-                  <div className="summary-enhanced-icon">
-                    <Maximize2 size={18} />
-                  </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Size</div>
-                    <div className="summary-enhanced-value">
-                      {tarpaulinData.width && tarpaulinData.height 
-                        ? `${tarpaulinData.width} × ${tarpaulinData.height} ft` 
-                        : '-'}
-                    </div>
-                  </div>
-                </div>
-                <div className="summary-enhanced-item">
-                  <div className="summary-enhanced-icon">
-                    <RotateCw size={18} />
-                  </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Orientation</div>
-                    <div className="summary-enhanced-value">{tarpaulinData.orientation || '-'}</div>
-                  </div>
-                </div>
-                <div className="summary-enhanced-item">
-                  <div className="summary-enhanced-icon">
-                    <Hash size={18} />
-                  </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Quantity</div>
-                    <div className="summary-enhanced-value">{tarpaulinData.quantity || '-'} pc(s)</div>
-                  </div>
-                </div>
-                <div className="summary-enhanced-item">
-                  <div className="summary-enhanced-icon">
-                    <Paintbrush size={18} />
-                  </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Background Color</div>
-                    <div className="summary-enhanced-value">{tarpaulinData.backgroundColor || '-'}</div>
-                  </div>
-                </div>
-                <div className="summary-enhanced-item">
-                  <div className="summary-enhanced-icon">
-                    <Type size={18} />
-                  </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Text/Main Color</div>
-                    <div className="summary-enhanced-value">{tarpaulinData.textColor || '-'}</div>
-                  </div>
-                </div>
-                <div className="summary-enhanced-item">
-                  <div className="summary-enhanced-icon">
+        <div className="order-form-step-tarpaulin">
+          <div className="tarpaulin-form-compact">
+            {/* Payment Method & Details and Order Cart Row */}
+            <div className="step4-sections-row">
+              {/* Payment Method and Details Section */}
+              <div className="form-section-compact payment-method-details-section">
+                <div className="section-header-compact">
+                  <div className="section-icon-compact">
                     <Wallet size={18} />
                   </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Payment Method</div>
-                    <div className="summary-enhanced-value">{tarpaulinData.paymentMethod || '-'}</div>
-                  </div>
+                  <h3>Payment Method & Details</h3>
                 </div>
-                <div className="summary-enhanced-item">
-                  <div className="summary-enhanced-icon">
-                    <DollarSign size={18} />
+                <div className="payment-method-details-content">
+                  {/* Payment Method */}
+                  <div className="form-field-compact full-width">
+                    <label>Payment Method *</label>
+                    <div className="payment-methods-compact">
+                      <button
+                        type="button"
+                        className={`payment-method-compact ${tarpaulinData.paymentMethod === 'Cash' ? 'active' : ''}`}
+                        onClick={() => handleTarpaulinInputChange('paymentMethod', 'Cash')}
+                      >
+                        <Wallet size={14} />
+                        <span>Cash</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`payment-method-compact ${tarpaulinData.paymentMethod === 'GCash' ? 'active' : ''}`}
+                        onClick={() => handleTarpaulinInputChange('paymentMethod', 'GCash')}
+                      >
+                        <CreditCard size={14} />
+                        <span>GCash</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`payment-method-compact ${tarpaulinData.paymentMethod === 'Bank Transfer' ? 'active' : ''}`}
+                        onClick={() => handleTarpaulinInputChange('paymentMethod', 'Bank Transfer')}
+                      >
+                        <CreditCard size={14} />
+                        <span>Bank</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`payment-method-compact ${tarpaulinData.paymentMethod === 'Credit Card' ? 'active' : ''}`}
+                        onClick={() => handleTarpaulinInputChange('paymentMethod', 'Credit Card')}
+                      >
+                        <CreditCard size={14} />
+                        <span>Card</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="summary-enhanced-content">
-                    <div className="summary-enhanced-label">Down Payment</div>
-                    <div className="summary-enhanced-value">
-                      {tarpaulinData.downPayment ? `₱${parseFloat(tarpaulinData.downPayment).toFixed(2)}` : '-'}
+
+                  {/* Down Payment */}
+                  <div className="form-field-compact full-width">
+                    <label>Down Payment</label>
+                    <div className="field-input-wrapper">
+                      <DollarSign size={16} className="field-icon" />
+                      <input
+                        type="number"
+                        placeholder="0.00"
+                        value={tarpaulinData.downPayment}
+                        onChange={(e) => handleTarpaulinInputChange('downPayment', e.target.value)}
+                        min="0"
+                        step="0.01"
+                      />
+                      <span className="field-unit">₱</span>
+                    </div>
+                  </div>
+
+                  {/* Payment Breakdown */}
+                  <div className="payment-breakdown-detailed">
+                    <div className="breakdown-header">
+                      <Calculator size={16} />
+                      <h4>Payment Breakdown</h4>
+                    </div>
+                    <div className="breakdown-content">
+                      {(() => {
+                        const width = parseFloat(tarpaulinData.width) || 0;
+                        const height = parseFloat(tarpaulinData.height) || 0;
+                        const quantity = parseFloat(tarpaulinData.quantity) || 1;
+                        const pricePerSqft = 12;
+                        const area = width * height;
+                        const subtotal = area * quantity * pricePerSqft;
+                        const downPayment = parseFloat(tarpaulinData.downPayment) || 0;
+                        const balance = subtotal - downPayment;
+
+                        return (
+                          <>
+                            <div className="breakdown-row">
+                              <span className="breakdown-label">Dimensions:</span>
+                              <span className="breakdown-value">
+                                {width > 0 && height > 0 
+                                  ? `${width} ft × ${height} ft` 
+                                  : width > 0 
+                                    ? `${width} ft (Width only)`
+                                    : height > 0
+                                      ? `${height} ft (Height only)`
+                                      : 'Not specified'}
+                              </span>
+                            </div>
+                            {width > 0 && height > 0 && (
+                              <>
+                                <div className="breakdown-row">
+                                  <span className="breakdown-label">Area per piece:</span>
+                                  <span className="breakdown-value">{area.toFixed(2)} sqft</span>
+                                </div>
+                                <div className="breakdown-row">
+                                  <span className="breakdown-label">Quantity:</span>
+                                  <span className="breakdown-value">{quantity} pc(s)</span>
+                                </div>
+                                <div className="breakdown-row">
+                                  <span className="breakdown-label">Total Area:</span>
+                                  <span className="breakdown-value">{(area * quantity).toFixed(2)} sqft</span>
+                                </div>
+                                <div className="breakdown-row">
+                                  <span className="breakdown-label">Price per sqft:</span>
+                                  <span className="breakdown-value">₱{pricePerSqft.toFixed(2)}</span>
+                                </div>
+                                <div className="breakdown-divider"></div>
+                                <div className="breakdown-row breakdown-subtotal">
+                                  <span className="breakdown-label">Subtotal:</span>
+                                  <span className="breakdown-value">₱{subtotal.toFixed(2)}</span>
+                                </div>
+                                <div className="breakdown-row">
+                                  <span className="breakdown-label">Down Payment:</span>
+                                  <span className="breakdown-value">₱{downPayment.toFixed(2)}</span>
+                                </div>
+                                <div className="breakdown-divider"></div>
+                                <div className="breakdown-row breakdown-total">
+                                  <span className="breakdown-label">Balance:</span>
+                                  <span className="breakdown-value">₱{balance.toFixed(2)}</span>
+                                </div>
+                              </>
+                            )}
+                            {(!width || !height) && (
+                              <div className="breakdown-empty">
+                                <span>Enter dimensions to calculate breakdown</span>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* Payment Section */}
-            <div className="form-section">
-              <h3 className="form-section-title">Payment Details</h3>
-              
-              {/* Payment Method Buttons - 1 Row */}
-              <div className="payment-method-group">
-                <label>Payment Method *</label>
-                <div className="payment-method-buttons">
-                  <button
-                    type="button"
-                    className={`payment-method-btn ${tarpaulinData.paymentMethod === 'Cash' ? 'active' : ''}`}
-                    onClick={() => handleTarpaulinInputChange('paymentMethod', 'Cash')}
-                  >
-                    <Wallet size={18} />
-                    <span>Cash</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`payment-method-btn ${tarpaulinData.paymentMethod === 'GCash' ? 'active' : ''}`}
-                    onClick={() => handleTarpaulinInputChange('paymentMethod', 'GCash')}
-                  >
-                    <CreditCard size={18} />
-                    <span>GCash</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`payment-method-btn ${tarpaulinData.paymentMethod === 'Bank Transfer' ? 'active' : ''}`}
-                    onClick={() => handleTarpaulinInputChange('paymentMethod', 'Bank Transfer')}
-                  >
-                    <CreditCard size={18} />
-                    <span>Bank Transfer</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`payment-method-btn ${tarpaulinData.paymentMethod === 'Credit Card' ? 'active' : ''}`}
-                    onClick={() => handleTarpaulinInputChange('paymentMethod', 'Credit Card')}
-                  >
-                    <CreditCard size={18} />
-                    <span>Credit Card</span>
-                  </button>
+              {/* Order Cart Section */}
+              <div className="form-section-compact order-cart-section">
+                <div className="section-header-compact">
+                  <div className="section-icon-compact">
+                    <Package size={18} />
+                  </div>
+                  <h3>Order Cart</h3>
                 </div>
-              </div>
-
-              {/* Down Payment */}
-              <div className="down-payment-enhanced">
-                <label>Down Payment</label>
-                <div className="down-payment-input-wrapper">
-                  <div className="down-payment-icon">
-                    <DollarSign size={18} />
-                  </div>
-                  <input
-                    type="number"
-                    placeholder="0.00"
-                    value={tarpaulinData.downPayment}
-                    onChange={(e) => handleTarpaulinInputChange('downPayment', e.target.value)}
-                    min="0"
-                    step="0.01"
-                    className="down-payment-input"
-                  />
-                  <span className="down-payment-currency">PHP</span>
-                </div>
-              </div>
-
-              {/* Payment Breakdown */}
-              <div className="payment-breakdown">
-                <h4 className="payment-breakdown-title">Payment Breakdown</h4>
-                <div className="payment-breakdown-content">
-                  <div className="payment-breakdown-item">
-                    <span className="payment-breakdown-label">Down Payment:</span>
-                    <span className="payment-breakdown-value">
-                      ₱{tarpaulinData.downPayment ? parseFloat(tarpaulinData.downPayment).toFixed(2) : '0.00'}
-                    </span>
-                  </div>
-                  <div className="payment-breakdown-item">
-                    <span className="payment-breakdown-label">Balance:</span>
-                    <span className="payment-breakdown-value">
-                      ₱0.00
-                    </span>
-                  </div>
-                  <div className="payment-breakdown-item payment-breakdown-total">
-                    <span className="payment-breakdown-label">Total:</span>
-                    <span className="payment-breakdown-value">
-                      ₱{tarpaulinData.downPayment ? parseFloat(tarpaulinData.downPayment).toFixed(2) : '0.00'}
-                    </span>
+                <div className="order-cart-compact">
+                  <div className="cart-item-compact">
+                    <div className="cart-item-header-compact">
+                      <div className="cart-item-icon-compact">
+                        <Package size={20} />
+                      </div>
+                      <div className="cart-item-info-compact">
+                        <h4 className="cart-item-name-compact">Tarpaulin</h4>
+                        <p className="cart-item-type-compact">
+                          {tarpaulinData.width && tarpaulinData.height 
+                            ? `${tarpaulinData.width} × ${tarpaulinData.height} ft` 
+                            : tarpaulinData.width 
+                              ? `${tarpaulinData.width} ft (Width)` 
+                              : tarpaulinData.height
+                                ? `${tarpaulinData.height} ft (Height)`
+                                : 'Size not specified'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="cart-item-details-compact">
+                      <div className="cart-detail-row-compact">
+                        <span className="cart-detail-label-compact">Orientation:</span>
+                        <span className="cart-detail-value-compact">{tarpaulinData.orientation || 'Not specified'}</span>
+                      </div>
+                      <div className="cart-detail-row-compact">
+                        <span className="cart-detail-label-compact">Quantity:</span>
+                        <span className="cart-detail-value-compact">{tarpaulinData.quantity || '1'} pc(s)</span>
+                      </div>
+                      {tarpaulinData.isPahabol && (
+                        <div className="cart-detail-row-compact">
+                          <span className="cart-detail-label-compact">Type:</span>
+                          <span className="cart-detail-value-compact pahabol-badge-compact">Pahabol</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="cart-item-footer-compact">
+                      <div className="cart-item-price-compact">
+                        <span className="price-label-compact">Total Amount:</span>
+                        <span className="price-value-compact">
+                          ₱{tarpaulinData.downPayment ? parseFloat(tarpaulinData.downPayment).toFixed(2) : '0.00'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
-
-                {/* Print Buttons */}
-                <div className="print-buttons-row">
-                  <button type="button" className="print-btn" onClick={() => console.log('Print Invoice')}>
-                    <FileText size={16} />
-                    <span>Print Invoice</span>
-                  </button>
-                  <button type="button" className="print-btn" onClick={() => console.log('Print Detail Copy')}>
-                    <FileText size={16} />
-                    <span>Print Detail Copy</span>
-                  </button>
-                  <button type="button" className="print-btn" onClick={() => console.log('Print Receipt')}>
-                    <FileText size={16} />
-                    <span>Print Receipt</span>
-                  </button>
-                </div>
-              </div>
-              
-              <div className="payment-note">
-                <div className="payment-note-header">
-                  <FileText size={16} />
-                  <strong>Important Note for Graphic Artist</strong>
-                </div>
-                <ul className="payment-note-list">
-                  <li>Enter the down payment amount agreed with the customer.</li>
-                  <li>Select the payment method the customer will use at the cashier.</li>
-                  <li>This information will be sent to the cashier for payment collection.</li>
-                  <li>Confirm all details with the customer before saving the order.</li>
-                </ul>
               </div>
             </div>
           </div>
@@ -3191,67 +5191,787 @@ function CreateOrderView() {
       )}
 
       {step === 4 && orderType === 'Sublimation' && (
-        <div className="order-form-step">
-          <div className="repair-form">
+        <div className="order-form-step-tarpaulin" style={{ overflow: 'visible' }}>
+          <div className="tarpaulin-form-compact" style={{ overflow: 'visible' }}>
             {!showProductSelection ? (
               <>
-                {/* Cart Actions */}
-                <div className="form-section">
-                  <div className="cart-actions">
-                    <button 
-                      type="button" 
-                      className="btn-add-product"
-                      onClick={handleShowProductSelection}
-                    >
-                      <Plus size={20} />
-                      ADD PRODUCT
-                    </button>
-                    <button 
-                      type="button" 
-                      className="btn-clear-order"
-                      onClick={handleClearCart}
-                      disabled={cartItems.length === 0}
-                    >
-                      CLEAR ORDER
-                    </button>
+                {/* Product Management and Order Cart Row */}
+                <div className="step4-sections-row">
+                  {/* Product Management Section */}
+                  <div className="form-section-compact product-management-section">
+                    <div className="section-header-compact product-management-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                        <div className="section-icon-compact">
+                          <Package size={18} />
+                        </div>
+                        <h3>Product Management</h3>
+                      </div>
+                      <div className="product-management-buttons">
+                        <button 
+                          type="button" 
+                          className="btn-add-product-header"
+                          onClick={handleShowProductSelection}
+                        >
+                          <Plus size={16} />
+                          ADD PRODUCT
+                        </button>
+                        <button 
+                          type="button" 
+                          className="btn-clear-order-header"
+                          onClick={handleClearCart}
+                          disabled={cartItems.length === 0}
+                        >
+                          CLEAR ORDER
+                        </button>
+                      </div>
+                    </div>
+                    <div className="product-type-list">
+                      {(() => {
+                        // Group items by product type
+                        const grouped = cartItems.reduce((acc, item) => {
+                          if (!acc[item.productType]) {
+                            acc[item.productType] = {}
+                          }
+                          if (!acc[item.productType][item.size]) {
+                            acc[item.productType][item.size] = 0
+                          }
+                          acc[item.productType][item.size] += parseInt(item.quantity) || 0
+                          return acc
+                        }, {})
+                        
+                        return Object.keys(grouped).length === 0 ? (
+                          <div style={{
+                            padding: '40px 20px',
+                            textAlign: 'center',
+                            color: '#666666',
+                            fontSize: '13px'
+                          }}>
+                            No products added yet
+                          </div>
+                        ) : (
+                          Object.entries(grouped).map(([productType, sizes]) => {
+                            const sizeList = Object.entries(sizes)
+                              .filter(([_, qty]) => qty > 0)
+                              .map(([size, qty]) => `${size}(${qty})`)
+                              .join(', ')
+                            const totalQty = Object.values(sizes).reduce((sum, qty) => sum + qty, 0)
+                            
+                        return (
+                          <div key={productType} className="product-type-item">
+                            <div className="product-type-name">{productType}</div>
+                            <div className="product-type-sizes">
+                              {Object.entries(sizes)
+                                .filter(([_, qty]) => qty > 0)
+                                .map(([size, qty], idx, arr) => (
+                                  <span key={size} className="size-badge">
+                                    <span className="size-label">{size}</span>
+                                    <span className="size-quantity">{qty}</span>
+                                  </span>
+                                ))}
+                            </div>
+                            <div className="product-type-footer">
+                              <span className="product-type-total">{totalQty} {totalQty === 1 ? 'item' : 'items'} total</span>
+                              <span className="product-type-count">{Object.keys(sizes).filter(s => sizes[s] > 0).length} {Object.keys(sizes).filter(s => sizes[s] > 0).length === 1 ? 'size' : 'sizes'}</span>
+                            </div>
+                          </div>
+                        )
+                          })
+                        )
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Order Cart Section */}
+                  <div className="form-section-compact order-cart-section">
+                    <div className="section-header-compact">
+                      <div className="section-icon-compact">
+                        <Package size={18} />
+                      </div>
+                      <h3>Order Cart ({cartItems.length} items)</h3>
+                    </div>
+                    {cartItems.length === 0 ? (
+                      <div style={{
+                        padding: '60px 20px',
+                        textAlign: 'center',
+                        color: '#666666',
+                        marginTop: '16px'
+                      }}>
+                        <Package size={48} style={{ marginBottom: '16px', opacity: 0.5 }} />
+                        <p style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: '600' }}>No items in cart</p>
+                        <span style={{ fontSize: '13px' }}>Add products to get started</span>
+                      </div>
+                    ) : (
+                      <div style={{
+                        marginTop: '0',
+                        flex: 1,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        minHeight: 0,
+                        background: '#0f0f0f',
+                        border: 'none',
+                        borderTop: '1px solid #1a1a1a',
+                        borderRadius: '0',
+                        overflow: 'hidden',
+                        width: '100%'
+                      }}>
+                        <div style={{
+                          flex: 1,
+                          overflowY: 'auto',
+                          overflowX: 'hidden',
+                          minHeight: 0
+                        }}>
+                          <table style={{
+                            width: '100%',
+                            borderCollapse: 'collapse'
+                          }}>
+                          <thead>
+                            <tr style={{
+                              background: '#0a0a0a',
+                              borderBottom: '2px solid #1a1a1a',
+                              position: 'sticky',
+                              top: 0,
+                              zIndex: 10
+                            }}>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'left',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                color: '#888888',
+                                textTransform: 'uppercase',
+                                letterSpacing: '1px'
+                              }}>#</th>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'left',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                color: '#888888',
+                                textTransform: 'uppercase',
+                                letterSpacing: '1px'
+                              }}>PRODUCT TYPE</th>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'left',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                color: '#888888',
+                                textTransform: 'uppercase',
+                                letterSpacing: '1px'
+                              }}>SIZE</th>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'left',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                color: '#888888',
+                                textTransform: 'uppercase',
+                                letterSpacing: '1px'
+                              }}>QUANTITY</th>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'left',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                color: '#888888',
+                                textTransform: 'uppercase',
+                                letterSpacing: '1px'
+                              }}>PRICE</th>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'left',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                color: '#888888',
+                                textTransform: 'uppercase',
+                                letterSpacing: '1px'
+                              }}>TOTAL</th>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'center',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                color: '#888888',
+                                textTransform: 'uppercase',
+                                letterSpacing: '1px'
+                              }}>ACTION</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {cartItems.map((item, index) => (
+                              <tr key={item.id} style={{
+                                borderBottom: '1px solid #1a1a1a',
+                                transition: 'background 0.2s ease'
+                              }}
+                              onMouseEnter={(e) => e.currentTarget.style.background = '#141414'}
+                              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                              >
+                              <td style={{ padding: '14px 16px', fontSize: '13px', color: '#aaaaaa' }}>{index + 1}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '13px', color: '#ffffff', fontWeight: '600' }}>{item.productType}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '13px', color: '#aaaaaa' }}>{item.size}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '13px', color: '#aaaaaa' }}>{item.quantity}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '13px', color: '#aaaaaa' }}>₱{item.price ? item.price.toFixed(2) : '0.00'}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '13px', color: '#ffffff', fontWeight: '600' }}>₱{item.totalPrice ? item.totalPrice.toFixed(2) : '0.00'}</td>
+                                <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                                  <button 
+                                    className="btn-remove-item"
+                                    onClick={() => handleRemoveFromCart(item.id)}
+                                    title="Remove item"
+                                    style={{
+                                      background: 'transparent',
+                                      border: '1px solid #2a2a2a',
+                                      borderRadius: '6px',
+                                      color: '#ffffff',
+                                      width: '28px',
+                                      height: '28px',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      transition: 'all 0.2s ease',
+                                      fontSize: '16px',
+                                      lineHeight: '1'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.background = '#1a1a1a'
+                                      e.currentTarget.style.borderColor = '#3a3a3a'
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.background = 'transparent'
+                                      e.currentTarget.style.borderColor = '#2a2a2a'
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        </div>
+                        <div style={{
+                          padding: '16px',
+                          background: '#0a0a0a',
+                          borderTop: '2px solid #1a1a1a',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <div style={{ fontSize: '13px', color: '#888888', marginBottom: '8px' }}>
+                            <strong style={{ color: '#ffffff' }}>Total Items:</strong> {cartItems.reduce((sum, item) => sum + item.quantity, 0)}
+                          </div>
+                          <div style={{ fontSize: '13px', color: '#888888', marginBottom: '8px' }}>
+                            <strong style={{ color: '#ffffff' }}>Total Products:</strong> {cartItems.length}
+                          </div>
+                          <div style={{
+                            fontSize: '14px',
+                            color: '#ffffff',
+                            fontWeight: '700',
+                            paddingTop: '12px',
+                            borderTop: '2px solid #1a1a1a'
+                          }}>
+                            <strong>Grand Total:</strong> <span style={{ fontSize: '16px', marginLeft: '8px' }}>₱{cartItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                {/* Cart Table */}
-                <div className="form-section">
-                  <h3 className="form-section-title">Order Cart ({cartItems.length} items)</h3>
-                  {cartItems.length === 0 ? (
-                    <div className="cart-empty">
-                      <Package size={48} />
-                      <p>No items in cart</p>
-                      <span>Add products to get started</span>
+              </>
+            ) : (
+              <>
+                {!selectedProductType ? (
+                  <>
+                    {/* Product Type Selection View */}
+                    <div style={{ width: '100%', padding: '0', display: 'flex', flexDirection: 'column', overflow: 'visible' }}>
+                      <div className="section-header-compact" style={{ marginBottom: '20px', flexShrink: 0 }}>
+                        <div className="section-icon-compact">
+                          <Package size={18} />
+                        </div>
+                        <h3>Select Product Type</h3>
+                      </div>
+                      <div className="order-type-grid-enhanced" style={{ 
+                        marginTop: 0, 
+                        flex: 1, 
+                        minHeight: 0, 
+                        overflow: 'visible',
+                        paddingBottom: '20px'
+                      }}>
+                        {productTypes.map((product) => (
+                          <div
+                            key={product.id}
+                            className="order-type-card-enhanced"
+                            onClick={() => handleSelectProductType(product)}
+                            style={{ cursor: 'pointer', overflow: 'visible' }}
+                          >
+                            <div className="card-header-enhanced">
+                              <div className="card-header-main">
+                                <div className="order-type-icon-enhanced">
+                                  <span style={{ fontSize: '24px', display: 'block' }}>{product.icon}</span>
+                                </div>
+                                <h3 style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>{product.name}</h3>
+                              </div>
+                            </div>
+                            <div className="card-body-enhanced">
+                              <p className="card-description" style={{ marginBottom: '8px' }}>
+                                Custom sublimation printing
+                              </p>
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                marginTop: 'auto',
+                                paddingTop: '8px',
+                                borderTop: '1px solid #222222',
+                                flexWrap: 'wrap'
+                              }}>
+                                <span style={{
+                                  fontSize: '18px',
+                                  fontWeight: '700',
+                                  color: '#ffffff',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  ₱{product.price.toFixed(2)}
+                                </span>
+                                <span style={{
+                                  fontSize: '10px',
+                                  color: '#999999',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.5px',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  per piece
+                                </span>
+                              </div>
+                            </div>
+                            <div className="card-footer-enhanced">
+                              <span className="card-action-text" style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>Select {product.name}</span>
+                              <div className="card-arrow-enhanced">→</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  ) : (
-                    <div className="cart-table-container">
-                      <table className="cart-table">
+                  </>
+                ) : (
+                  <>
+                      {/* Size Selection - Standard Sizes */}
+                      <div className="form-section-compact standard-sizes-section" style={{ width: '100%' }}>
+                        <div className="section-header-compact standard-sizes-header">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                            <button
+                              type="button"
+                              onClick={handleBackToProductSelection}
+                              className="back-button-enhanced"
+                            >
+                              <ArrowLeft size={16} />
+                            </button>
+                            <div className="section-icon-compact">
+                              <Maximize2 size={18} />
+                            </div>
+                            <h3 style={{ margin: 0 }}>{selectedProductType.name} - Standard Sizes</h3>
+                          </div>
+                          <div className="standard-sizes-header-buttons">
+                            <button 
+                              type="button" 
+                              onClick={handleCancelProductSelection}
+                              className="btn-cancel-standard"
+                            >
+                              CANCEL
+                            </button>
+                            <button 
+                              type="button" 
+                              onClick={handleAddProductToCart}
+                              className="btn-add-to-cart-standard"
+                            >
+                              ADD TO CART
+                            </button>
+                          </div>
+                        </div>
+                        <div className="standard-sizes-grid">
+                          {Object.keys(productSelectionData.sizes).map((size) => {
+                            const sizeNames = {
+                              'XS': 'Extra Small',
+                              'S': 'Small',
+                              'M': 'Medium',
+                              'L': 'Large',
+                              'XL': 'Extra Large',
+                              '2XL': '2X Large',
+                              '3XL': '3X Large',
+                              '4XL': '4X Large'
+                            };
+                            const fullSizeName = sizeNames[size] || size;
+                            
+                            return (
+                              <div key={size} className="size-input-card">
+                                <div className="size-indicator">
+                                  <span className="size-indicator-code">{size}</span>
+                                  <span className="size-indicator-name">{fullSizeName}</span>
+                                </div>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={productSelectionData.sizes[size] || ''}
+                                  onChange={(e) => {
+                                    const value = e.target.value === '' ? '' : e.target.value;
+                                    handleSizeQuantityChange(size, value);
+                                  }}
+                                  onFocus={(e) => {
+                                    if (e.target.value === '0') {
+                                      e.target.value = '';
+                                    }
+                                  }}
+                                  placeholder=""
+                                  className="size-input-enhanced"
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Custom Sizes */}
+                      <div className="form-section-compact custom-sizes-section" style={{ width: '100%' }}>
+                        <div className="custom-sizes-header">
+                          <div className="section-header-compact" style={{ margin: 0, padding: 0 }}>
+                            <div className="section-icon-compact">
+                              <Maximize2 size={18} />
+                            </div>
+                            <h3>Custom Sizes</h3>
+                          </div>
+                          <button 
+                            type="button" 
+                            onClick={handleAddCustomSize}
+                            className="btn-add-custom-size-enhanced"
+                          >
+                            <Plus size={16} />
+                            ADD CUSTOM SIZE
+                          </button>
+                        </div>
+                        {productSelectionData.customSizes.length > 0 && (
+                          <div className="custom-sizes-list-enhanced">
+                            {productSelectionData.customSizes.map((customSize, index) => (
+                              <div key={index} className="custom-size-row-enhanced">
+                                <input
+                                  type="text"
+                                  placeholder="Size name (e.g., 4XL, Baby)"
+                                  value={customSize.size}
+                                  onChange={(e) => handleCustomSizeChange(index, 'size', e.target.value)}
+                                  className="custom-size-name-input-enhanced"
+                                />
+                                <input
+                                  type="number"
+                                  min="0"
+                                  placeholder="Quantity"
+                                  value={customSize.quantity}
+                                  onChange={(e) => handleCustomSizeChange(index, 'quantity', e.target.value)}
+                                  className="custom-size-qty-input-enhanced"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveCustomSize(index)}
+                                  className="btn-remove-custom-size-enhanced"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                    </>
+                  )}
+                </>
+              )}
+          </div>
+        </div>
+      )}
+
+      {step === 5 && orderType === 'Sublimation' && (
+        <div className="order-form-step-tarpaulin">
+          <div className="tarpaulin-form-compact">
+            {/* Payment Method & Details and Order Cart Row */}
+            <div className="step4-sections-row">
+              {/* Payment Method and Details Section */}
+              <div className="form-section-compact payment-method-details-section">
+                <div className="section-header-compact">
+                  <div className="section-icon-compact">
+                    <Wallet size={18} />
+                  </div>
+                  <h3>Payment Method & Details</h3>
+                </div>
+                <div className="payment-method-details-content">
+                  {/* Payment Method */}
+                  <div className="form-field-compact full-width">
+                    <label>Payment Method *</label>
+                    <div className="payment-methods-compact">
+                      <button
+                        type="button"
+                        className={`payment-method-compact ${sublimationData.paymentMethod === 'Cash' ? 'active' : ''}`}
+                        onClick={() => handleSublimationInputChange('paymentMethod', 'Cash')}
+                      >
+                        <Wallet size={14} />
+                        <span>Cash</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`payment-method-compact ${sublimationData.paymentMethod === 'GCash' ? 'active' : ''}`}
+                        onClick={() => handleSublimationInputChange('paymentMethod', 'GCash')}
+                      >
+                        <CreditCard size={14} />
+                        <span>GCash</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`payment-method-compact ${sublimationData.paymentMethod === 'Bank Transfer' ? 'active' : ''}`}
+                        onClick={() => handleSublimationInputChange('paymentMethod', 'Bank Transfer')}
+                      >
+                        <CreditCard size={14} />
+                        <span>Bank</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`payment-method-compact ${sublimationData.paymentMethod === 'Credit Card' ? 'active' : ''}`}
+                        onClick={() => handleSublimationInputChange('paymentMethod', 'Credit Card')}
+                      >
+                        <CreditCard size={14} />
+                        <span>Card</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Down Payment */}
+                  <div className="form-field-compact full-width">
+                    <label>Down Payment</label>
+                    <div className="field-input-wrapper">
+                      <DollarSign size={16} className="field-icon" />
+                      <input
+                        type="number"
+                        placeholder="0.00"
+                        value={sublimationData.downPayment}
+                        onChange={(e) => handleSublimationInputChange('downPayment', e.target.value)}
+                        min="0"
+                        step="0.01"
+                      />
+                      <span className="field-unit">₱</span>
+                    </div>
+                  </div>
+
+                  {/* Payment Breakdown */}
+                  <div className="payment-breakdown-detailed">
+                    <div className="breakdown-header">
+                      <Calculator size={16} />
+                      <h4>Payment Breakdown</h4>
+                    </div>
+                    <div className="breakdown-content">
+                      {(() => {
+                        const totalItems = cartItems.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
+                        const totalProducts = cartItems.length;
+                        const subtotal = cartItems.reduce((sum, item) => sum + (parseFloat(item.totalPrice) || 0), 0);
+                        const downPayment = parseFloat(sublimationData.downPayment) || 0;
+                        const balance = subtotal - downPayment;
+
+                        return (
+                          <>
+                            <div className="breakdown-row">
+                              <span className="breakdown-label">Total Products:</span>
+                              <span className="breakdown-value">{totalProducts} {totalProducts === 1 ? 'product' : 'products'}</span>
+                            </div>
+                            <div className="breakdown-row">
+                              <span className="breakdown-label">Total Items:</span>
+                              <span className="breakdown-value">{totalItems} {totalItems === 1 ? 'item' : 'items'}</span>
+                            </div>
+                            {cartItems.length > 0 && (
+                              <>
+                                <div className="breakdown-divider"></div>
+                                <div className="breakdown-row breakdown-subtotal">
+                                  <span className="breakdown-label">Subtotal:</span>
+                                  <span className="breakdown-value">₱{subtotal.toFixed(2)}</span>
+                                </div>
+                                <div className="breakdown-row">
+                                  <span className="breakdown-label">Down Payment:</span>
+                                  <span className="breakdown-value">₱{downPayment.toFixed(2)}</span>
+                                </div>
+                                <div className="breakdown-divider"></div>
+                                <div className="breakdown-row breakdown-total">
+                                  <span className="breakdown-label">Balance:</span>
+                                  <span className="breakdown-value">₱{balance.toFixed(2)}</span>
+                                </div>
+                              </>
+                            )}
+                            {cartItems.length === 0 && (
+                              <div className="breakdown-empty">
+                                <span>Add products to see breakdown</span>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Order Cart Section */}
+              <div className="form-section-compact order-cart-section">
+                <div className="section-header-compact">
+                  <div className="section-icon-compact">
+                    <Package size={18} />
+                  </div>
+                  <h3>Order Cart ({cartItems.length} items)</h3>
+                </div>
+                {cartItems.length === 0 ? (
+                  <div style={{
+                    padding: '60px 20px',
+                    textAlign: 'center',
+                    color: '#666666',
+                    marginTop: '16px'
+                  }}>
+                    <Package size={48} style={{ marginBottom: '16px', opacity: 0.5 }} />
+                    <p style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: '600' }}>No items in cart</p>
+                    <span style={{ fontSize: '13px' }}>Add products to get started</span>
+                  </div>
+                ) : (
+                  <div style={{
+                    marginTop: '0',
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    minHeight: 0,
+                    background: '#0f0f0f',
+                    border: 'none',
+                    borderTop: '1px solid #1a1a1a',
+                    borderRadius: '0',
+                    overflow: 'hidden',
+                    width: '100%'
+                  }}>
+                    <div style={{
+                      flex: 1,
+                      overflowY: 'auto',
+                      overflowX: 'hidden',
+                      minHeight: 0
+                    }}>
+                      <table style={{
+                        width: '100%',
+                        borderCollapse: 'collapse'
+                      }}>
                         <thead>
-                          <tr>
-                            <th>#</th>
-                            <th>PRODUCT TYPE</th>
-                            <th>SIZE</th>
-                            <th>QUANTITY</th>
-                            <th>ARTIST</th>
-                            <th>ACTION</th>
+                          <tr style={{
+                            background: '#0a0a0a',
+                            borderBottom: '2px solid #1a1a1a',
+                            position: 'sticky',
+                            top: 0,
+                            zIndex: 10
+                          }}>
+                            <th style={{
+                              padding: '12px 16px',
+                              textAlign: 'left',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              color: '#888888',
+                              textTransform: 'uppercase',
+                              letterSpacing: '1px'
+                            }}>#</th>
+                            <th style={{
+                              padding: '12px 16px',
+                              textAlign: 'left',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              color: '#888888',
+                              textTransform: 'uppercase',
+                              letterSpacing: '1px'
+                            }}>PRODUCT TYPE</th>
+                            <th style={{
+                              padding: '12px 16px',
+                              textAlign: 'left',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              color: '#888888',
+                              textTransform: 'uppercase',
+                              letterSpacing: '1px'
+                            }}>SIZE</th>
+                            <th style={{
+                              padding: '12px 16px',
+                              textAlign: 'left',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              color: '#888888',
+                              textTransform: 'uppercase',
+                              letterSpacing: '1px'
+                            }}>QUANTITY</th>
+                            <th style={{
+                              padding: '12px 16px',
+                              textAlign: 'left',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              color: '#888888',
+                              textTransform: 'uppercase',
+                              letterSpacing: '1px'
+                            }}>PRICE</th>
+                            <th style={{
+                              padding: '12px 16px',
+                              textAlign: 'left',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              color: '#888888',
+                              textTransform: 'uppercase',
+                              letterSpacing: '1px'
+                            }}>TOTAL</th>
+                            <th style={{
+                              padding: '12px 16px',
+                              textAlign: 'center',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              color: '#888888',
+                              textTransform: 'uppercase',
+                              letterSpacing: '1px'
+                            }}>ACTION</th>
                           </tr>
                         </thead>
                         <tbody>
                           {cartItems.map((item, index) => (
-                            <tr key={item.id}>
-                              <td>{index + 1}</td>
-                              <td>{item.productType}</td>
-                              <td>{item.size}</td>
-                              <td>{item.quantity}</td>
-                              <td>{item.assignedArtist}</td>
-                              <td>
+                            <tr key={item.id} style={{
+                              borderBottom: '1px solid #1a1a1a',
+                              transition: 'background 0.2s ease'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = '#141414'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                            >
+                              <td style={{ padding: '14px 16px', fontSize: '13px', color: '#aaaaaa' }}>{index + 1}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '13px', color: '#ffffff', fontWeight: '600' }}>{item.productType}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '13px', color: '#aaaaaa' }}>{item.size}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '13px', color: '#aaaaaa' }}>{item.quantity}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '13px', color: '#aaaaaa' }}>₱{item.price ? item.price.toFixed(2) : '0.00'}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '13px', color: '#ffffff', fontWeight: '600' }}>₱{item.totalPrice ? item.totalPrice.toFixed(2) : '0.00'}</td>
+                              <td style={{ padding: '14px 16px', textAlign: 'center' }}>
                                 <button 
                                   className="btn-remove-item"
                                   onClick={() => handleRemoveFromCart(item.id)}
                                   title="Remove item"
+                                  style={{
+                                    background: 'transparent',
+                                    border: '1px solid #2a2a2a',
+                                    borderRadius: '6px',
+                                    color: '#ffffff',
+                                    width: '28px',
+                                    height: '28px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    transition: 'all 0.2s ease',
+                                    fontSize: '16px',
+                                    lineHeight: '1'
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = '#1a1a1a'
+                                    e.currentTarget.style.borderColor = '#3a3a3a'
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = 'transparent'
+                                    e.currentTarget.style.borderColor = '#2a2a2a'
+                                  }}
                                 >
                                   ✕
                                 </button>
@@ -3260,128 +5980,47 @@ function CreateOrderView() {
                           ))}
                         </tbody>
                       </table>
-                      <div className="cart-summary">
-                        <div className="cart-summary-row">
-                          <span>Total Items:</span>
-                          <strong>{cartItems.reduce((sum, item) => sum + item.quantity, 0)}</strong>
+                    </div>
+                    <div style={{
+                      padding: '16px',
+                      background: '#0a0a0a',
+                      borderTop: '2px solid #1a1a1a',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '12px'
+                    }}>
+                      <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                      }}>
+                        <div style={{
+                          fontSize: '12px',
+                          color: '#888888'
+                        }}>
+                          Total Items: <strong style={{ color: '#ffffff' }}>{cartItems.reduce((sum, item) => sum + item.quantity, 0)}</strong>
                         </div>
-                        <div className="cart-summary-row">
-                          <span>Total Products:</span>
-                          <strong>{cartItems.length}</strong>
+                        <div style={{
+                          fontSize: '12px',
+                          color: '#888888'
+                        }}>
+                          Total Products: <strong style={{ color: '#ffffff' }}>{cartItems.length}</strong>
                         </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                {/* Product Selection View */}
-                <div className="form-section">
-                  <h3 className="form-section-title">Product Selection</h3>
-                  <div className="enhanced-field">
-                    <label>Product Type *</label>
-                    <div className="enhanced-field-wrapper">
-                      <div className="enhanced-field-icon">
-                        <Package size={18} />
+                      <div style={{
+                        fontSize: '16px',
+                        fontWeight: '800',
+                        color: '#ffffff'
+                      }}>
+                        Grand Total: <strong style={{ fontSize: '18px' }}>₱{cartItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0).toFixed(2)}</strong>
                       </div>
-                      <input
-                        type="text"
-                        placeholder="e.g., T-Shirt, Mug, Tumbler"
-                        value={productSelectionData.productType}
-                        onChange={(e) => handleProductTypeChange(e.target.value)}
-                        className="enhanced-field-input"
-                      />
                     </div>
                   </div>
-                </div>
-
-                {/* Size Selection */}
-                <div className="form-section">
-                  <h3 className="form-section-title">Size Selection - Standard Sizes</h3>
-                  <div className="size-selection-grid">
-                    {Object.keys(productSelectionData.sizes).map((size) => (
-                      <div key={size} className="size-item">
-                        <label className="size-label">{size}</label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={productSelectionData.sizes[size]}
-                          onChange={(e) => handleSizeQuantityChange(size, e.target.value)}
-                          className="size-input"
-                          placeholder="0"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Custom Sizes */}
-                <div className="form-section">
-                  <div className="custom-size-header">
-                    <h3 className="form-section-title">Custom Sizes</h3>
-                    <button 
-                      type="button" 
-                      className="btn-add-custom-size"
-                      onClick={handleAddCustomSize}
-                    >
-                      <Plus size={16} />
-                      ADD CUSTOM SIZE
-                    </button>
-                  </div>
-                  {productSelectionData.customSizes.length > 0 && (
-                    <div className="custom-sizes-list">
-                      {productSelectionData.customSizes.map((customSize, index) => (
-                        <div key={index} className="custom-size-row">
-                          <input
-                            type="text"
-                            placeholder="Size name (e.g., 4XL, Baby)"
-                            value={customSize.size}
-                            onChange={(e) => handleCustomSizeChange(index, 'size', e.target.value)}
-                            className="custom-size-name-input"
-                          />
-                          <input
-                            type="number"
-                            min="0"
-                            placeholder="Quantity"
-                            value={customSize.quantity}
-                            onChange={(e) => handleCustomSizeChange(index, 'quantity', e.target.value)}
-                            className="custom-size-qty-input"
-                          />
-                          <button
-                            type="button"
-                            className="btn-remove-custom-size"
-                            onClick={() => handleRemoveCustomSize(index)}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Action Buttons */}
-                <div className="form-section">
-                  <div className="product-selection-actions">
-                    <button 
-                      type="button" 
-                      className="btn-cancel-selection"
-                      onClick={handleCancelProductSelection}
-                    >
-                      CANCEL
-                    </button>
-                    <button 
-                      type="button" 
-                      className="btn-confirm-product"
-                      onClick={handleAddProductToCart}
-                    >
-                      ADD TO CART
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -3398,305 +6037,480 @@ function CreateOrderView() {
 
         {/* Right Sidebar - Only visible after selecting type */}
         {step > 1 && (
-          <div className="order-sidebar">
-            <div className="sidebar-section">
-              <div className="sidebar-header">
-                <h3>Order Information</h3>
+          <div className="order-sidebar-redesigned">
+            <div className="sidebar-header-redesigned">
+              <div className="sidebar-header-icon">
+                {orderType === 'Repairs' && <Wrench size={18} />}
+                {orderType === 'Tarpaulin' && <Package size={18} />}
+                {orderType !== 'Repairs' && orderType !== 'Tarpaulin' && <Package size={18} />}
               </div>
-              
-              <div className="sidebar-content">
-                {/* Category */}
-                <div className="sidebar-item">
-                  <div className="sidebar-label">Category</div>
-                  <div className="sidebar-value category-badge">
-                    {orderType === 'Repairs' && <Wrench size={16} />}
-                    {orderType === 'Tarpaulin' && <Package size={16} />}
-                    {orderType !== 'Repairs' && orderType !== 'Tarpaulin' && <Package size={16} />}
-                    <span>{orderType}</span>
+              <div className="sidebar-header-text">
+                <h3>Order Summary</h3>
+                <p>Step {step} of {steps.length}</p>
+              </div>
+            </div>
+            
+            <div className="sidebar-content-redesigned">
+              {/* Category Badge */}
+              <div className="sidebar-category-badge">
+                <div className="category-badge-icon">
+                  {orderType === 'Repairs' && <Wrench size={16} />}
+                  {orderType === 'Tarpaulin' && <Package size={16} />}
+                  {orderType !== 'Repairs' && orderType !== 'Tarpaulin' && <Package size={16} />}
+                </div>
+                <span className="category-badge-text">{orderType}</span>
+              </div>
+
+              {/* Selected Customer Info - For Tarpaulin and Sublimation Step 2 */}
+              {(orderType === 'Tarpaulin' || orderType === 'Sublimation') && step === 2 && selectedCustomer && (
+                <div className="selected-customer-info">
+                  <div className="selected-customer-header">
+                    <div className="selected-customer-badge">
+                      <User size={14} />
+                      <span>{selectedCustomer.name}</span>
+                      <button
+                        type="button"
+                        className="remove-customer-btn"
+                        onClick={() => {
+                          setSelectedCustomer(null)
+                          setIsNewCustomer(true)
+                          setCustomerOrders([])
+                          if (orderType === 'Tarpaulin') {
+                            setTarpaulinData(prev => ({
+                              ...prev,
+                              customerName: '',
+                              contactNumber: '',
+                              email: '',
+                              address: '',
+                              businessName: ''
+                            }))
+                          } else if (orderType === 'Sublimation') {
+                            setSublimationData(prev => ({
+                              ...prev,
+                              customerName: '',
+                              contactNumber: '',
+                              email: '',
+                              address: '',
+                              businessName: ''
+                            }))
+                          }
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                    <div className="customer-balance-info">
+                      <div className="balance-item">
+                        <span className="balance-label">Total Balance:</span>
+                        <span className="balance-amount">₱{parseFloat(selectedCustomer.totalBalance || 0).toFixed(2)}</span>
+                      </div>
+                      <div className="balance-item">
+                        <span className="balance-label">Total Orders:</span>
+                        <span className="balance-amount">{selectedCustomer.totalOrders || 0}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
+              )}
 
-                <div className="sidebar-divider"></div>
+              {/* Pahabol Toggle - Only for Tarpaulin Step 2 */}
+              {orderType === 'Tarpaulin' && step === 2 && !isNewCustomer && selectedCustomer && (
+                <div className="form-section-compact pahabol-toggle-section">
+                  <div className="pahabol-toggle-wrapper">
+                    <div className="pahabol-toggle-content">
+                      <div className="pahabol-toggle-icon">
+                        <Clock size={20} />
+                      </div>
+                      <div className="pahabol-toggle-info">
+                        <div className="pahabol-toggle-title">Pahabol Order</div>
+                        <div className="pahabol-toggle-description">Mark this as a rush/pahabol order</div>
+                      </div>
+                    </div>
+                    <label className="pahabol-toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={tarpaulinData.isPahabol}
+                        onChange={(e) => handleTarpaulinInputChange('isPahabol', e.target.checked)}
+                      />
+                      <span className="pahabol-toggle-slider"></span>
+                    </label>
+                  </div>
+                </div>
+              )}
 
-                {/* Repairs Information */}
-                {orderType === 'Repairs' && (
+              {/* Repairs Information */}
+              {orderType === 'Repairs' && (
                   <>
-                    <div className="sidebar-item">
-                      <div className="sidebar-label">Customer Name</div>
-                      <div className="sidebar-value">{repairData.customerName || 'Not provided'}</div>
-                    </div>
-
-                    <div className="sidebar-item">
-                      <div className="sidebar-label">Contact Number</div>
-                      <div className="sidebar-value">{repairData.contactNumber || 'Not provided'}</div>
-                    </div>
-
-                    {repairData.email && (
-                      <div className="sidebar-item">
-                        <div className="sidebar-label">Email</div>
-                        <div className="sidebar-value">{repairData.email}</div>
+                    {/* Customer Section */}
+                    <div className="sidebar-group-redesigned">
+                      <div className="sidebar-group-title">
+                        <User size={12} />
+                        <span>Customer</span>
                       </div>
-                    )}
-
-                    <div className="sidebar-divider"></div>
-
-                    <div className="sidebar-item">
-                      <div className="sidebar-label">Device Type</div>
-                      <div className="sidebar-value">{repairData.deviceType || 'Not selected'}</div>
-                    </div>
-
-                    {repairData.deviceBrand && (
-                      <div className="sidebar-item">
-                        <div className="sidebar-label">Brand</div>
-                        <div className="sidebar-value">{repairData.deviceBrand}</div>
-                      </div>
-                    )}
-
-                    {repairData.deviceModel && (
-                      <div className="sidebar-item">
-                        <div className="sidebar-label">Model</div>
-                        <div className="sidebar-value">{repairData.deviceModel}</div>
-                      </div>
-                    )}
-
-                    {repairData.techAssigned && (
-                      <>
-                        <div className="sidebar-divider"></div>
-                        <div className="sidebar-item">
-                          <div className="sidebar-label">Assigned Technician</div>
-                          <div className="sidebar-value">{repairData.techAssigned}</div>
+                      <div className="sidebar-group-content">
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Name</span>
+                          <span className="info-value">{repairData.customerName || 'Not provided'}</span>
                         </div>
-                      </>
-                    )}
-
-                    {step === 3 && repairData.problems.length > 0 && (
-                      <>
-                        <div className="sidebar-divider"></div>
-                        <div className="sidebar-item">
-                          <div className="sidebar-label">Issues Reported</div>
-                          <div className="sidebar-value">{repairData.problems.length} problem(s)</div>
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Contact</span>
+                          <span className="info-value">{repairData.contactNumber || 'Not provided'}</span>
                         </div>
-                      </>
-                    )}
-
-                    <div className="sidebar-divider"></div>
-                    <div className="sidebar-item">
-                      <div className="sidebar-label">Order Status</div>
-                      <div className="sidebar-value">
-                        <span style={{
-                          display: 'inline-block',
-                          padding: '4px 10px',
-                          background: '#1a3a5c',
-                          color: '#4da3ff',
-                          borderRadius: '6px',
-                          fontSize: '12px',
-                          fontWeight: '600'
-                        }}>
-                          In Progress
-                        </span>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* Tarpaulin Information */}
-                {orderType === 'Tarpaulin' && (
-                  <>
-                    <div className="sidebar-item">
-                      <div className="sidebar-label">Customer Name</div>
-                      <div className="sidebar-value">{tarpaulinData.customerName || 'Not provided'}</div>
-                    </div>
-
-                    <div className="sidebar-item">
-                      <div className="sidebar-label">Contact Number</div>
-                      <div className="sidebar-value">{tarpaulinData.contactNumber || 'Not provided'}</div>
-                    </div>
-
-                    {tarpaulinData.email && (
-                      <div className="sidebar-item">
-                        <div className="sidebar-label">Email</div>
-                        <div className="sidebar-value">{tarpaulinData.email}</div>
-                      </div>
-                    )}
-
-                    {tarpaulinData.businessName && (
-                      <div className="sidebar-item">
-                        <div className="sidebar-label">Business Name</div>
-                        <div className="sidebar-value">{tarpaulinData.businessName}</div>
-                      </div>
-                    )}
-
-                    {tarpaulinData.eventType && (
-                      <>
-                        <div className="sidebar-divider"></div>
-                        <div className="sidebar-item">
-                          <div className="sidebar-label">Event Type</div>
-                          <div className="sidebar-value">{tarpaulinData.eventType}</div>
-                        </div>
-                      </>
-                    )}
-
-                    {tarpaulinData.eventDate && (
-                      <div className="sidebar-item">
-                        <div className="sidebar-label">Event Date</div>
-                        <div className="sidebar-value">
-                          {new Date(tarpaulinData.eventDate).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric'
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {tarpaulinData.preferredDeliveryDate && (
-                      <>
-                        <div className="sidebar-divider"></div>
-                        <div className="sidebar-item">
-                          <div className="sidebar-label">Preferred Pickup</div>
-                          <div className="sidebar-value">
-                            {new Date(tarpaulinData.preferredDeliveryDate).toLocaleDateString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric'
-                            })}
+                        {repairData.email && (
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Email</span>
+                            <span className="info-value">{repairData.email}</span>
                           </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Device Section */}
+                    {(repairData.deviceType || repairData.deviceBrand || repairData.deviceModel) && (
+                      <div className="sidebar-group-redesigned">
+                        <div className="sidebar-group-title">
+                          <Monitor size={12} />
+                          <span>Device</span>
                         </div>
-                      </>
+                        <div className="sidebar-group-content">
+                          {repairData.deviceType && (
+                            <div className="sidebar-info-item">
+                              <span className="info-label">Type</span>
+                              <span className="info-value">{repairData.deviceType}</span>
+                            </div>
+                          )}
+                          {repairData.deviceBrand && (
+                            <div className="sidebar-info-item">
+                              <span className="info-label">Brand</span>
+                              <span className="info-value">{repairData.deviceBrand}</span>
+                            </div>
+                          )}
+                          {repairData.deviceModel && (
+                            <div className="sidebar-info-item">
+                              <span className="info-label">Model</span>
+                              <span className="info-value">{repairData.deviceModel}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     )}
 
-                    {(tarpaulinData.width || tarpaulinData.height) && (
-                      <>
-                        <div className="sidebar-divider"></div>
-                        <div className="sidebar-item">
-                          <div className="sidebar-label">Dimensions</div>
-                          <div className="sidebar-value">
+                    {/* Technician & Issues */}
+                    {(repairData.techAssigned || (step === 3 && repairData.problems.length > 0)) && (
+                      <div className="sidebar-group-redesigned">
+                        <div className="sidebar-group-title">
+                          <Wrench size={12} />
+                          <span>Service</span>
+                        </div>
+                        <div className="sidebar-group-content">
+                          {repairData.techAssigned && (
+                            <div className="sidebar-info-item">
+                              <span className="info-label">Technician</span>
+                              <span className="info-value">{repairData.techAssigned}</span>
+                            </div>
+                          )}
+                          {step === 3 && repairData.problems.length > 0 && (
+                            <div className="sidebar-info-item">
+                              <span className="info-label">Issues</span>
+                              <span className="info-value">{repairData.problems.length} problem(s)</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
+              )}
+
+              {/* Tarpaulin Information */}
+              {orderType === 'Tarpaulin' && (
+                  <>
+                    {/* Customer Section */}
+                    <div className="sidebar-group-redesigned">
+                      <div className="sidebar-group-title">
+                        <User size={12} />
+                        <span>Customer</span>
+                      </div>
+                      <div className="sidebar-group-content">
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Name</span>
+                          <span className="info-value">{tarpaulinData.customerName || 'Not provided'}</span>
+                        </div>
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Contact</span>
+                          <span className="info-value">{tarpaulinData.contactNumber || 'Not provided'}</span>
+                        </div>
+                        {tarpaulinData.email && (
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Email</span>
+                            <span className="info-value">{tarpaulinData.email}</span>
+                          </div>
+                        )}
+                        {tarpaulinData.businessName && (
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Business</span>
+                            <span className="info-value">{tarpaulinData.businessName}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Event Section */}
+                    <div className="sidebar-group-redesigned">
+                      <div className="sidebar-group-title">
+                        <Calendar size={12} />
+                        <span>Event & Dates</span>
+                      </div>
+                      <div className="sidebar-group-content">
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Event Type</span>
+                          <span className="info-value">{tarpaulinData.eventType || 'Not provided'}</span>
+                        </div>
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Event Date</span>
+                          <span className="info-value">
+                            {tarpaulinData.eventDate 
+                              ? new Date(tarpaulinData.eventDate).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric'
+                                })
+                              : 'Not provided'}
+                          </span>
+                        </div>
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Pickup Date</span>
+                          <span className="info-value">
+                            {tarpaulinData.preferredDeliveryDate
+                              ? new Date(tarpaulinData.preferredDeliveryDate).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric'
+                                })
+                              : 'Not provided'}
+                          </span>
+                        </div>
+                        {tarpaulinData.rushOrder && (
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Rush Order</span>
+                            <span className="info-value rush-order-badge">Priority Processing</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Assigned Artist Section */}
+                    <div className="sidebar-group-redesigned">
+                      <div className="sidebar-group-title">
+                        <User size={12} />
+                        <span>Assigned Artist</span>
+                      </div>
+                      <div className="sidebar-group-content">
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Artist</span>
+                          <span className="info-value">{tarpaulinData.assignedArtist || 'Not assigned'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Order Details Section */}
+                    <div className="sidebar-group-redesigned">
+                      <div className="sidebar-group-title">
+                        <Package size={12} />
+                        <span>Order Details</span>
+                      </div>
+                      <div className="sidebar-group-content">
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Dimensions</span>
+                          <span className="info-value">
                             {tarpaulinData.width && tarpaulinData.height 
                               ? `${tarpaulinData.width} x ${tarpaulinData.height} ft` 
                               : tarpaulinData.width 
                                 ? `${tarpaulinData.width} ft (W)` 
-                                : `${tarpaulinData.height} ft (H)`}
-                          </div>
+                                : tarpaulinData.height
+                                  ? `${tarpaulinData.height} ft (H)`
+                                  : 'Not provided'}
+                          </span>
                         </div>
-                      </>
-                    )}
-
-                    {tarpaulinData.orientation && (
-                      <div className="sidebar-item">
-                        <div className="sidebar-label">Orientation</div>
-                        <div className="sidebar-value">{tarpaulinData.orientation}</div>
-                      </div>
-                    )}
-
-                    {tarpaulinData.quantity && (
-                      <div className="sidebar-item">
-                        <div className="sidebar-label">Quantity</div>
-                        <div className="sidebar-value">{tarpaulinData.quantity} pc(s)</div>
-                      </div>
-                    )}
-
-                    {(tarpaulinData.backgroundColor || tarpaulinData.textColor) && (
-                      <>
-                        <div className="sidebar-divider"></div>
-                        {tarpaulinData.backgroundColor && (
-                          <div className="sidebar-item">
-                            <div className="sidebar-label">Background Color</div>
-                            <div className="sidebar-value">{tarpaulinData.backgroundColor}</div>
-                          </div>
-                        )}
-                        {tarpaulinData.textColor && (
-                          <div className="sidebar-item">
-                            <div className="sidebar-label">Text Color</div>
-                            <div className="sidebar-value">{tarpaulinData.textColor}</div>
-                          </div>
-                        )}
-                      </>
-                    )}
-
-                    {step === 4 && tarpaulinData.amountPaid && (
-                      <>
-                        <div className="sidebar-divider"></div>
-                        <div className="sidebar-item">
-                          <div className="sidebar-label">Amount Paid</div>
-                          <div className="sidebar-value">₱{parseFloat(tarpaulinData.amountPaid).toFixed(2)}</div>
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Orientation</span>
+                          <span className="info-value">{tarpaulinData.orientation || 'Not provided'}</span>
                         </div>
-                      </>
-                    )}
-
-                    <div className="sidebar-divider"></div>
-                    <div className="sidebar-item">
-                      <div className="sidebar-label">Order Status</div>
-                      <div className="sidebar-value">
-                        <span style={{
-                          display: 'inline-block',
-                          padding: '4px 10px',
-                          background: '#1a3a5c',
-                          color: '#4da3ff',
-                          borderRadius: '6px',
-                          fontSize: '12px',
-                          fontWeight: '600'
-                        }}>
-                          In Progress
-                        </span>
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Quantity</span>
+                          <span className="info-value">{tarpaulinData.quantity || 'Not provided'} pc(s)</span>
+                        </div>
                       </div>
                     </div>
+
+                    {/* Payment Section */}
+                    <div className="sidebar-group-redesigned">
+                      <div className="sidebar-group-title">
+                        <Wallet size={12} />
+                        <span>Payment</span>
+                      </div>
+                      <div className="sidebar-group-content">
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Payment Method</span>
+                          <span className="info-value">{tarpaulinData.paymentMethod || 'Not selected'}</span>
+                        </div>
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Down Payment</span>
+                          <span className="info-value">
+                            ₱{tarpaulinData.downPayment ? parseFloat(tarpaulinData.downPayment).toFixed(2) : '0.00'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Pahabol Badge */}
+                    {tarpaulinData.isPahabol && (
+                      <div className="sidebar-pahabol-badge">
+                        <div className="pahabol-badge-icon">
+                          <Clock size={12} />
+                        </div>
+                        <span className="pahabol-badge-text">Pahabol Order</span>
+                      </div>
+                    )}
                   </>
                 )}
 
-                {/* Other Order Types */}
-                {orderType !== 'Repairs' && orderType !== 'Tarpaulin' && (
+              {/* Sublimation Information */}
+              {orderType === 'Sublimation' && (
                   <>
-                    <div className="sidebar-item">
-                      <div className="sidebar-label">Order Type</div>
-                      <div className="sidebar-value">{orderType}</div>
-                    </div>
-                    <div className="sidebar-divider"></div>
-                    <div className="sidebar-item">
-                      <div className="sidebar-label">Status</div>
-                      <div className="sidebar-value">
-                        <span style={{
-                          display: 'inline-block',
-                          padding: '4px 10px',
-                          background: '#1a3a5c',
-                          color: '#4da3ff',
-                          borderRadius: '6px',
-                          fontSize: '12px',
-                          fontWeight: '600'
-                        }}>
-                          In Progress
-                        </span>
+                    {/* Customer Section */}
+                    <div className="sidebar-group-redesigned">
+                      <div className="sidebar-group-title">
+                        <User size={12} />
+                        <span>Customer</span>
+                      </div>
+                      <div className="sidebar-group-content">
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Name</span>
+                          <span className="info-value">{sublimationData.customerName || 'Not provided'}</span>
+                        </div>
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Contact</span>
+                          <span className="info-value">{sublimationData.contactNumber || 'Not provided'}</span>
+                        </div>
+                        {sublimationData.email && (
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Email</span>
+                            <span className="info-value">{sublimationData.email}</span>
+                          </div>
+                        )}
+                        {sublimationData.businessName && (
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Business</span>
+                            <span className="info-value">{sublimationData.businessName}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
+
+                    {/* Order Section */}
+                    <div className="sidebar-group-redesigned">
+                      <div className="sidebar-group-title">
+                        <Calendar size={12} />
+                        <span>Order & Dates</span>
+                      </div>
+                      <div className="sidebar-group-content">
+                        <div className="sidebar-info-item">
+                          <span className="info-label">Pickup Date</span>
+                          <span className="info-value">
+                            {sublimationData.pickupDate 
+                              ? new Date(sublimationData.pickupDate).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric'
+                                })
+                              : 'Not provided'}
+                          </span>
+                        </div>
+                        {sublimationData.rushOrder && (
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Rush Order</span>
+                            <span className="info-value rush-order-badge">Priority Processing</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Assigned Artist Section */}
+                    {step >= 3 && (
+                      <div className="sidebar-group-redesigned">
+                        <div className="sidebar-group-title">
+                          <User size={12} />
+                          <span>Assigned Artist</span>
+                        </div>
+                        <div className="sidebar-group-content">
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Artist</span>
+                            <span className="info-value">{sublimationData.assignedArtist || 'Not assigned'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Product Details Section */}
+                    {step >= 3 && (
+                      <div className="sidebar-group-redesigned">
+                        <div className="sidebar-group-title">
+                          <Package size={12} />
+                          <span>Product Details</span>
+                        </div>
+                        <div className="sidebar-group-content">
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Product Type</span>
+                            <span className="info-value">{sublimationData.productType || 'Not provided'}</span>
+                          </div>
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Size</span>
+                            <span className="info-value">{sublimationData.size || 'Not provided'}</span>
+                          </div>
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Quantity</span>
+                            <span className="info-value">{sublimationData.quantity || '1'} pc(s)</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Payment Section */}
+                    {step === 4 && (
+                      <div className="sidebar-group-redesigned">
+                        <div className="sidebar-group-title">
+                          <Wallet size={12} />
+                          <span>Payment</span>
+                        </div>
+                        <div className="sidebar-group-content">
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Payment Method</span>
+                            <span className="info-value">{sublimationData.paymentMethod || 'Not selected'}</span>
+                          </div>
+                          <div className="sidebar-info-item">
+                            <span className="info-label">Down Payment</span>
+                            <span className="info-value">
+                              ₱{sublimationData.downPayment ? parseFloat(sublimationData.downPayment).toFixed(2) : '0.00'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
-
-                <div className="sidebar-divider"></div>
-
-                {/* Order Timestamp and Step in One Row */}
-                <div className="sidebar-row-items">
-                  <div className="sidebar-item">
-                    <div className="sidebar-label">Created</div>
-                    <div className="sidebar-value" style={{ fontSize: '12px', color: '#888888' }}>
-                      {new Date().toLocaleString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="sidebar-item">
-                    <div className="sidebar-label">Current Step</div>
-                    <div className="sidebar-value">Step {step} of {steps.length}</div>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         )}
       </div>
+      
+      {/* Custom Alert Modal */}
+      <Alert
+        isOpen={alert.isOpen}
+        onClose={closeAlert}
+        type={alert.type}
+        title={alert.title}
+        message={alert.message}
+      />
     </div>
   )
 }
@@ -3725,7 +6539,117 @@ function CreatePahabolView() {
 }
 
 // Order Tracking View
-function OrderTrackingView() {
+function OrderTrackingView({ user }) {
+  const [orders, setOrders] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [statusFilter, setStatusFilter] = useState('all') // all, pending, in-progress, completed
+  const [orderTypeFilter, setOrderTypeFilter] = useState('all') // all, Tarpaulin, Repairs, Sublimation
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [selectedOrder, setSelectedOrder] = useState(null)
+  const [viewingOrder, setViewingOrder] = useState(false)
+
+  useEffect(() => {
+    loadOrders()
+  }, [])
+
+  const loadOrders = async () => {
+    try {
+      setLoading(true)
+      const allOrders = await fetchOrders()
+      setOrders(allOrders)
+    } catch (error) {
+      console.error('Error loading orders:', error)
+      alert('Failed to load orders')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const formatPeso = (amount) => {
+    return `₱${Number(amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+
+  const formatDate = (dateString) => {
+    if (!dateString) return '-'
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+
+  const formatDateForInput = (dateString) => {
+    if (!dateString) return ''
+    const date = new Date(dateString)
+    return date.toISOString().split('T')[0]
+  }
+
+  const clearFilters = () => {
+    setStatusFilter('all')
+    setOrderTypeFilter('all')
+    setStartDate('')
+    setEndDate('')
+    setSearchTerm('')
+  }
+
+  const filteredOrders = orders.filter(order => {
+    // Status filter
+    const matchesStatus = statusFilter === 'all' || order.status === statusFilter
+    
+    // Order type filter
+    const matchesOrderType = orderTypeFilter === 'all' || order.orderType === orderTypeFilter
+    
+    // Date range filter
+    let matchesDateRange = true
+    if (startDate || endDate) {
+      const orderDate = new Date(order.createdAt)
+      orderDate.setHours(0, 0, 0, 0)
+      
+      if (startDate) {
+        const start = new Date(startDate)
+        start.setHours(0, 0, 0, 0)
+        if (orderDate < start) {
+          matchesDateRange = false
+        }
+      }
+      
+      if (endDate) {
+        const end = new Date(endDate)
+        end.setHours(23, 59, 59, 999)
+        if (orderDate > end) {
+          matchesDateRange = false
+        }
+      }
+    }
+    
+    // Search filter
+    const orderData = order.orderData || {}
+    const assignedArtist = orderData.assignedArtist || ''
+    const matchesSearch = !searchTerm || 
+      order.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.customerContact?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.orderType?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.receivedBy?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      assignedArtist.toLowerCase().includes(searchTerm.toLowerCase())
+    
+    return matchesStatus && matchesOrderType && matchesDateRange && matchesSearch
+  })
+
+  // If viewing a specific order, show the ViewOrderPage
+  if (viewingOrder && selectedOrder) {
+    return <ViewOrderPage 
+      order={selectedOrder} 
+      onBack={() => {
+        setViewingOrder(false)
+        setSelectedOrder(null)
+      }} 
+    />
+  }
+
   return (
     <div className="view-container">
       <div className="view-header">
@@ -3739,9 +6663,536 @@ function OrderTrackingView() {
           </div>
         </div>
       </div>
-      <div className="content-placeholder">
-        <Package size={48} />
-        <p>Order tracking list will be here</p>
+
+      <div className="order-tracking-content">
+        {/* Filters and Search */}
+        <div className="order-tracking-filters">
+          <div className="filters-row">
+            {/* Status Filter */}
+            <div className="filter-group">
+              <label className="filter-label">Status</label>
+              <div className="filter-buttons">
+                <button 
+                  className={`filter-btn ${statusFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => setStatusFilter('all')}
+                >
+                  All
+                </button>
+                <button 
+                  className={`filter-btn ${statusFilter === 'pending' ? 'active' : ''}`}
+                  onClick={() => setStatusFilter('pending')}
+                >
+                  Pending
+                </button>
+                <button 
+                  className={`filter-btn ${statusFilter === 'in-progress' ? 'active' : ''}`}
+                  onClick={() => setStatusFilter('in-progress')}
+                >
+                  In Progress
+                </button>
+                <button 
+                  className={`filter-btn ${statusFilter === 'completed' ? 'active' : ''}`}
+                  onClick={() => setStatusFilter('completed')}
+                >
+                  Completed
+                </button>
+              </div>
+            </div>
+
+            {/* Order Type Filter */}
+            <div className="filter-group">
+              <label className="filter-label">Order Type</label>
+              <select
+                className="filter-select"
+                value={orderTypeFilter}
+                onChange={(e) => setOrderTypeFilter(e.target.value)}
+              >
+                <option value="all">All Types</option>
+                <option value="Tarpaulin">Tarpaulin</option>
+                <option value="Repairs">Repairs</option>
+                <option value="Sublimation">Sublimation</option>
+              </select>
+            </div>
+
+            {/* Date Range Filter */}
+            <div className="filter-group">
+              <label className="filter-label">Date Range</label>
+              <div className="date-range-inputs">
+                <div className="date-input-wrapper">
+                  <Calendar size={14} />
+                  <input
+                    type="date"
+                    className="date-input"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    placeholder="Start Date"
+                  />
+                </div>
+                <span className="date-separator">to</span>
+                <div className="date-input-wrapper">
+                  <Calendar size={14} />
+                  <input
+                    type="date"
+                    className="date-input"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    placeholder="End Date"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Clear Filters Button */}
+            {(statusFilter !== 'all' || orderTypeFilter !== 'all' || startDate || endDate || searchTerm) && (
+              <button className="clear-filters-btn" onClick={clearFilters}>
+                <X size={14} />
+                Clear Filters
+              </button>
+            )}
+          </div>
+
+          {/* Search */}
+          <div className="search-wrapper">
+            <Search size={16} />
+            <input
+              type="text"
+              placeholder="Search by customer, contact, order type, received by, or assigned to..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Orders Table */}
+        {loading ? (
+          <div className="loading-placeholder">
+            <p>Loading orders...</p>
+          </div>
+        ) : filteredOrders.length === 0 ? (
+          <div className="content-placeholder">
+            <Package size={48} />
+            <p>No orders found</p>
+          </div>
+        ) : (
+          <div className="order-tracking-table-container">
+            <table className="order-tracking-table">
+              <thead>
+                <tr>
+                  <th>Order #</th>
+                  <th>Type</th>
+                  <th>Customer</th>
+                  <th>Contact</th>
+                  <th>Total</th>
+                  <th>Paid</th>
+                  <th>Balance</th>
+                  <th>Status</th>
+                  <th>Received By</th>
+                  <th>Assigned To</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredOrders.map((order) => {
+                  const orderData = order.orderData || {}
+                  const assignedArtist = orderData.assignedArtist || 'Not Assigned'
+                  return (
+                            <tr
+                              key={order.id}
+                              onClick={() => {
+                                setSelectedOrder(order)
+                                setViewingOrder(true)
+                              }}
+                              style={{ cursor: 'pointer' }}
+                            >
+                      <td className="order-number-cell">
+                        <div className="order-number-wrapper">
+                          <span>#{order.id}</span>
+                          {order.isPahabol && (
+                            <span className="pahabol-badge-table" title="Pahabol (Rush)">
+                              <Clock size={10} />
+                              P
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="order-type-cell">
+                        <div className="order-type-badge-table">
+                          {order.orderType === 'Tarpaulin' && <Package size={14} />}
+                          {order.orderType === 'Repairs' && <Wrench size={14} />}
+                          {order.orderType !== 'Tarpaulin' && order.orderType !== 'Repairs' && <Package size={14} />}
+                          <span>{order.orderType}</span>
+                        </div>
+                      </td>
+                      <td>{order.customerName || '-'}</td>
+                      <td>{order.customerContact || '-'}</td>
+                      <td className="amount-cell">{formatPeso(order.totalAmount)}</td>
+                      <td className="amount-cell">{formatPeso(order.amountPaid)}</td>
+                      <td className={`amount-cell ${order.balance > 0 ? 'has-balance' : 'no-balance'}`}>
+                        {formatPeso(order.balance)}
+                      </td>
+                      <td>
+                        <span className={`status-badge-table status-${order.status}`}>
+                          <span className={`status-dot status-${order.status}`}></span>
+                          {order.status}
+                        </span>
+                      </td>
+                      <td className="employee-cell">{order.receivedBy || '-'}</td>
+                      <td className="employee-cell">{assignedArtist}</td>
+                      <td className="date-cell">{formatDate(order.createdAt)}</td>
+                    </tr>
+                  )
+                }                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+      </div>
+    </div>
+  )
+}
+
+// View Order Page Component
+function ViewOrderPage({ order, onBack }) {
+  const orderData = order.orderData || {}
+  const formatPeso = (amount) => {
+    return `₱${Number(amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+
+  const formatDate = (dateString) => {
+    if (!dateString) return '-'
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric'
+    })
+  }
+
+  const formatDateShort = (dateString) => {
+    if (!dateString) return '-'
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    })
+  }
+
+  return (
+    <div className="view-container employee-dashboard-full">
+      <div className="view-header view-header-compact">
+        <div className="header-content">
+          <button className="btn-back-order-compact" onClick={onBack}>
+            <ArrowLeft size={18} />
+            <span>Back</span>
+          </button>
+          <div className="header-icon-wrapper">
+            <Package size={24} />
+          </div>
+          <div>
+            <h1>Order #{order.id} • {order.customerName || 'Customer'}</h1>
+            <p>
+              {order.orderType} • {order.isPahabol ? 'Rush Order' : 'Regular Order'} • {formatPeso(order.totalAmount)} • Status: {order.status}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="employee-dashboard-main">
+        <div className="employee-dashboard-wrapper">
+
+          {/* Quick Stats Row */}
+          <div className="quick-stats-row">
+            <div className="quick-stat-card">
+              <div className="quick-stat-icon payroll">
+                <DollarSign size={20} />
+              </div>
+              <div className="quick-stat-content">
+                <span className="quick-stat-label">Total Amount</span>
+                <span className="quick-stat-value">{formatPeso(order.totalAmount)}</span>
+              </div>
+            </div>
+            <div className="quick-stat-card">
+              <div className="quick-stat-icon payroll-count">
+                <CreditCard size={20} />
+              </div>
+              <div className="quick-stat-content">
+                <span className="quick-stat-label">Amount Paid</span>
+                <span className="quick-stat-value">{formatPeso(order.amountPaid)}</span>
+              </div>
+            </div>
+            <div className="quick-stat-card">
+              <div className="quick-stat-icon cash-advance">
+                <Wallet size={20} />
+              </div>
+              <div className="quick-stat-content">
+                <span className="quick-stat-label">Balance</span>
+                <span className={`quick-stat-value ${order.balance > 0 ? 'warning' : 'success'}`}>
+                  {formatPeso(order.balance)}
+                </span>
+              </div>
+            </div>
+            <div className="quick-stat-card">
+              <div className="quick-stat-icon day-offs">
+                <Package size={20} />
+              </div>
+              <div className="quick-stat-content">
+                <span className="quick-stat-label">Status</span>
+                <span className="quick-stat-value">{order.status}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Order Information and Tarpaulin Specifications Grid */}
+          <div className="order-specs-grid">
+            {/* Order Information Card */}
+            <div className="employee-feature-card payroll-card">
+              <div className="feature-card-header">
+                <div className="feature-card-icon payroll">
+                  <Package size={24} />
+                </div>
+                <div>
+                  <h3>Order Information</h3>
+                  <p>Complete order details</p>
+                </div>
+              </div>
+              <div className="feature-card-body">
+                <div className="payroll-amount-display">
+                  <span className="payroll-label">Order Type</span>
+                  <span className="payroll-amount">{order.orderType}</span>
+                </div>
+                <div className="payroll-details-grid">
+                  <div className="payroll-detail-item">
+                    <span className="detail-label">Order Date</span>
+                    <span className="detail-value">{formatDate(order.createdAt)}</span>
+                  </div>
+                  <div className="payroll-detail-item">
+                    <span className="detail-label">Last Updated</span>
+                    <span className="detail-value">{formatDate(order.updatedAt || order.createdAt)}</span>
+                  </div>
+                  <div className="payroll-detail-item">
+                    <span className="detail-label">Status</span>
+                    <span className={`detail-value status-${order.status}`}>{order.status}</span>
+                  </div>
+                  <div className="payroll-detail-item">
+                    <span className="detail-label">Received By</span>
+                    <span className="detail-value">{order.receivedBy || 'N/A'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Tarpaulin Specifications Card */}
+            {order.orderType === 'Tarpaulin' && (
+              <div className="employee-feature-card day-offs-card">
+                <div className="feature-card-header">
+                  <div className="feature-card-icon day-offs">
+                    <Package size={24} />
+                  </div>
+                  <div>
+                    <h3>Tarpaulin Specifications</h3>
+                    <p>Product details and requirements</p>
+                  </div>
+                </div>
+                <div className="feature-card-body">
+                  <div className="employee-info-list">
+                    {orderData.width && orderData.height && (
+                      <div className="info-list-item">
+                        <span className="info-item-label">Dimensions</span>
+                        <span className="info-item-value">{orderData.width} × {orderData.height}</span>
+                      </div>
+                    )}
+                    <div className="info-list-item">
+                      <span className="info-item-label">Orientation</span>
+                      <span className="info-item-value">{orderData.orientation || 'Landscape'}</span>
+                    </div>
+                    <div className="info-list-item">
+                      <span className="info-item-label">Quantity</span>
+                      <span className="info-item-value">{orderData.quantity || '1'} pc(s)</span>
+                    </div>
+                    {orderData.eventType && (
+                      <div className="info-list-item">
+                        <span className="info-item-label">Event Type</span>
+                        <span className="info-item-value">{orderData.eventType}</span>
+                      </div>
+                    )}
+                    {orderData.backgroundColor && (
+                      <div className="info-list-item">
+                        <span className="info-item-label">Background Color</span>
+                        <span className="info-item-value">
+                          <span style={{ display: 'inline-block', width: '16px', height: '16px', background: orderData.backgroundColor, borderRadius: '4px', marginRight: '8px', verticalAlign: 'middle' }}></span>
+                          {orderData.backgroundColor}
+                        </span>
+                      </div>
+                    )}
+                    {orderData.textColor && (
+                      <div className="info-list-item">
+                        <span className="info-item-label">Text Color</span>
+                        <span className="info-item-value">
+                          <span style={{ display: 'inline-block', width: '16px', height: '16px', background: orderData.textColor, borderRadius: '4px', marginRight: '8px', verticalAlign: 'middle' }}></span>
+                          {orderData.textColor}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Customer Information and Team Assignment Grid */}
+          <div className="customer-team-grid">
+            {/* Customer Information */}
+            <div className="employee-feature-card history-card">
+              <div className="feature-card-header">
+                <div className="feature-card-icon history">
+                  <User size={24} />
+                </div>
+                <div>
+                  <h3>Customer Information</h3>
+                  <p>Contact and business details</p>
+                </div>
+              </div>
+              <div className="feature-card-body">
+                <div className="employee-info-list">
+                  <div className="info-list-item">
+                    <span className="info-item-label">Customer Name</span>
+                    <span className="info-item-value">{order.customerName || '-'}</span>
+                  </div>
+                  <div className="info-list-item">
+                    <span className="info-item-label">Contact Number</span>
+                    <span className="info-item-value">{order.customerContact || '-'}</span>
+                  </div>
+                  {orderData.email && (
+                    <div className="info-list-item">
+                      <span className="info-item-label">Email</span>
+                      <span className="info-item-value">{orderData.email}</span>
+                    </div>
+                  )}
+                  {orderData.businessName && (
+                    <div className="info-list-item">
+                      <span className="info-item-label">Business Name</span>
+                      <span className="info-item-value">{orderData.businessName}</span>
+                    </div>
+                  )}
+                  {orderData.address && (
+                    <div className="info-list-item">
+                      <span className="info-item-label">Address</span>
+                      <span className="info-item-value">{orderData.address}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Team Assignment */}
+            <div className="employee-feature-card access-card">
+              <div className="feature-card-header">
+                <div className="feature-card-icon access">
+                  <Users size={24} />
+                </div>
+                <div>
+                  <h3>Team Assignment</h3>
+                  <p>Order assignment details</p>
+                </div>
+              </div>
+              <div className="feature-card-body">
+                <div className="access-info-enhanced">
+                  <div className="access-item-enhanced">
+                    <div className="access-item-header-enhanced">
+                      <User size={18} />
+                      <span>Received By</span>
+                    </div>
+                    <div className="access-value-enhanced">
+                      <code>{order.receivedBy || 'N/A'}</code>
+                    </div>
+                  </div>
+                  <div className="access-item-enhanced">
+                    <div className="access-item-header-enhanced">
+                      <Paintbrush size={18} />
+                      <span>Assigned Artist</span>
+                    </div>
+                    <div className="access-value-enhanced">
+                      <code>{orderData.assignedArtist || 'Not Assigned'}</code>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Payment Summary - Full Width */}
+          <div className="payment-summary-full">
+            <div className="employee-feature-card cash-advance-card">
+              <div className="feature-card-header">
+                <div className="feature-card-icon cash-advance">
+                  <Wallet size={24} />
+                </div>
+                <div>
+                  <h3>Payment Summary</h3>
+                  <p>Payment details and timeline</p>
+                </div>
+              </div>
+              <div className="feature-card-body">
+                <div className="cash-advance-display">
+                  <span className="cash-advance-label">Balance Due</span>
+                  <span className={`cash-advance-amount ${order.balance > 0 ? 'warning' : 'success'}`}>
+                    {formatPeso(order.balance)}
+                  </span>
+                </div>
+                <div className="payroll-details-grid" style={{ marginTop: '12px' }}>
+                  <div className="payroll-detail-item">
+                    <span className="detail-label">Total Amount</span>
+                    <span className="detail-value">{formatPeso(order.totalAmount)}</span>
+                  </div>
+                  <div className="payroll-detail-item">
+                    <span className="detail-label">Amount Paid</span>
+                    <span className="detail-value">{formatPeso(order.amountPaid)}</span>
+                  </div>
+                  <div className="payroll-detail-item">
+                    <span className="detail-label">Payment Method</span>
+                    <span className="detail-value">{orderData.paymentMethod || 'Cash'}</span>
+                  </div>
+                  <div className="payroll-detail-item">
+                    <span className="detail-label">Payment Status</span>
+                    <span className={`detail-value ${order.balance === 0 ? 'success' : order.amountPaid > 0 ? 'warning' : ''}`}>
+                      {order.balance === 0 ? 'Fully Paid' : order.amountPaid > 0 ? 'Partially Paid' : 'Unpaid'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Notes & Instructions */}
+          {(orderData.designNotes || orderData.specialInstructions) && (
+            <div className="notes-instructions-full">
+              <div className="employee-feature-card info-card">
+                <div className="feature-card-header">
+                  <div className="feature-card-icon info">
+                    <FileText size={24} />
+                  </div>
+                  <div>
+                    <h3>Notes & Instructions</h3>
+                    <p>Design notes and special requirements</p>
+                  </div>
+                </div>
+                <div className="feature-card-body">
+                  {orderData.designNotes && (
+                    <div style={{ marginBottom: '16px' }}>
+                      <div style={{ fontSize: '11px', color: '#999', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Design Notes</div>
+                      <div style={{ fontSize: '13px', color: '#fff', lineHeight: '1.6' }}>{orderData.designNotes}</div>
+                    </div>
+                  )}
+                  {orderData.specialInstructions && (
+                    <div>
+                      <div style={{ fontSize: '11px', color: '#999', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Special Instructions</div>
+                      <div style={{ fontSize: '13px', color: '#fff', lineHeight: '1.6' }}>{orderData.specialInstructions}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -3788,6 +7239,52 @@ function SublimationListingView() {
       <div className="content-placeholder">
         <List size={48} />
         <p>Sublimation product listing will be here</p>
+      </div>
+    </div>
+  )
+}
+
+// Customer Profile View
+function CustomerProfileView() {
+  return (
+    <div className="view-container">
+      <div className="view-header">
+        <div className="header-content">
+          <div className="header-icon-wrapper">
+            <User size={24} />
+          </div>
+          <div>
+            <h1>Customer Profile</h1>
+            <p>Manage customer information and profiles</p>
+          </div>
+        </div>
+      </div>
+      <div className="content-placeholder">
+        <User size={48} />
+        <p>Customer profile management will be here</p>
+      </div>
+    </div>
+  )
+}
+
+// Customer Reports View
+function CustomerReportsView() {
+  return (
+    <div className="view-container">
+      <div className="view-header">
+        <div className="header-content">
+          <div className="header-icon-wrapper">
+            <FileText size={24} />
+          </div>
+          <div>
+            <h1>Customer Reports</h1>
+            <p>View and analyze customer reports</p>
+          </div>
+        </div>
+      </div>
+      <div className="content-placeholder">
+        <FileText size={48} />
+        <p>Customer reports and analytics will be here</p>
       </div>
     </div>
   )

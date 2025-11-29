@@ -12,7 +12,7 @@ import {
 import { useAuth } from '../contexts/AuthContext'
 import './Sidebar.css'
 
-function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, sublimationItems, currentView, onMenuClick }) {
+function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, sublimationItems, customersItems, currentView, onMenuClick }) {
   const { user } = useAuth()
   const isManager = user?.role === 'manager'
   const [showAccessModal, setShowAccessModal] = useState(false)
@@ -108,9 +108,30 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, subl
         {sublimationItems && sublimationItems.length > 0 && (
           <>
             <div className="sidebar-divider"></div>
-            {isOpen && <div className="sidebar-category">Sublimation Exclusive</div>}
+            {isOpen && <div className="sidebar-category">Sublimation</div>}
             <ul className="menu-list">
               {sublimationItems.map(item => (
+                <li key={item.id}>
+                  <button
+                    className={`menu-item ${finalActiveView === item.id ? 'active' : ''}`}
+                    onClick={() => finalSetActiveView(item.id)}
+                    title={!isOpen ? item.label : ''}
+                  >
+                    <item.icon size={20} />
+                    {isOpen && <span>{item.label}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {customersItems && customersItems.length > 0 && (
+          <>
+            <div className="sidebar-divider"></div>
+            {isOpen && <div className="sidebar-category">Customers</div>}
+            <ul className="menu-list">
+              {customersItems.map(item => (
                 <li key={item.id}>
                   <button
                     className={`menu-item ${finalActiveView === item.id ? 'active' : ''}`}

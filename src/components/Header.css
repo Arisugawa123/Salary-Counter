@@ -1,76 +1,44 @@
 /* ============================================ */
-/* REMASTERED SYSTEM HEADER */
+/* NEW HEADER DESIGN - BLACK & WHITE */
 /* ============================================ */
 
 .header {
   height: 80px;
-  background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 50%, #0a0a0a 100%);
-  border-bottom: 1px solid transparent;
+  background: #0a0a0a;
+  border-bottom: 2px solid #1a1a1a;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 32px;
+  padding: 0 24px;
   position: sticky;
   top: 0;
   z-index: 1000;
-  box-shadow: 
-    0 4px 24px rgba(0, 0, 0, 0.6),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.03),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
-/* Animated gradient border effect */
-.header::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  bottom: -1px;
-  padding-bottom: 1px;
-  background: linear-gradient(90deg, 
-    transparent 0%,
-    rgba(255, 255, 255, 0.1) 25%,
-    rgba(255, 255, 255, 0.15) 50%,
-    rgba(255, 255, 255, 0.1) 75%,
-    transparent 100%);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-}
+/* ============================================ */
+/* HEADER LEFT SECTION */
+/* ============================================ */
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
   flex: 1;
 }
 
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-/* ============================================ */
-/* MENU BUTTON */
-/* ============================================ */
-
+/* Menu Toggle Button - New Design */
 .icon-button {
-  background: linear-gradient(135deg, #1f1f1f 0%, #1a1a1a 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0f0f0f;
+  border: 2px solid #1a1a1a;
   color: #ffffff;
   cursor: pointer;
-  padding: 10px;
-  border-radius: 10px;
+  padding: 12px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 
-    0 2px 8px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: all 0.25s ease;
   position: relative;
   overflow: hidden;
 }
@@ -79,37 +47,31 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, 
-    rgba(255, 255, 255, 0.15) 0%, 
-    transparent 50%);
+  background: #ffffff;
   opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.icon-button:hover::before {
-  opacity: 1;
+  transition: opacity 0.25s ease;
 }
 
 .icon-button:hover {
-  background: linear-gradient(135deg, #2a2a2a 0%, #222222 100%);
-  border-color: rgba(255, 255, 255, 0.15);
-  transform: translateY(-2px);
-  box-shadow: 
-    0 6px 16px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  background: #141414;
+  border-color: #2a2a2a;
+  transform: scale(1.05);
+}
+
+.icon-button:hover::before {
+  opacity: 0.1;
 }
 
 .icon-button:active {
-  transform: translateY(0);
-  box-shadow: 
-    0 2px 8px rgba(0, 0, 0, 0.3),
-    inset 0 2px 4px rgba(0, 0, 0, 0.2);
+  transform: scale(0.98);
 }
 
-/* ============================================ */
-/* SEARCH BAR */
-/* ============================================ */
+.icon-button svg {
+  position: relative;
+  z-index: 1;
+}
 
+/* Search Container - New Design */
 .search-container {
   position: relative;
   display: flex;
@@ -118,11 +80,11 @@
 
 .search-icon {
   position: absolute;
-  left: 16px;
-  color: #888888;
+  left: 14px;
+  color: #666666;
   pointer-events: none;
   z-index: 1;
-  transition: color 0.3s ease;
+  transition: color 0.25s ease;
 }
 
 .search-container:focus-within .search-icon {
@@ -130,167 +92,170 @@
 }
 
 .search-input {
-  background: linear-gradient(135deg, #1a1a1a 0%, #151515 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 12px 16px 12px 48px;
+  background: #0f0f0f;
+  border: 2px solid #1a1a1a;
+  border-radius: 8px;
+  padding: 11px 16px 11px 44px;
   color: #ffffff;
   font-size: 14px;
   font-weight: 500;
-  width: 320px;
+  width: 300px;
   outline: none;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 
-    inset 0 2px 6px rgba(0, 0, 0, 0.3),
-    0 1px 0 rgba(255, 255, 255, 0.03);
-  letter-spacing: 0.2px;
+  transition: all 0.3s ease;
 }
 
 .search-input:focus {
-  border-color: rgba(255, 255, 255, 0.2);
-  width: 420px;
-  background: linear-gradient(135deg, #1f1f1f 0%, #1a1a1a 100%);
-  box-shadow: 
-    inset 0 2px 6px rgba(0, 0, 0, 0.4),
-    0 0 0 3px rgba(255, 255, 255, 0.05),
-    0 4px 12px rgba(0, 0, 0, 0.3);
+  border-color: #ffffff;
+  background: #141414;
+  width: 400px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
 }
 
 .search-input::placeholder {
-  color: #666666;
+  color: #555555;
   font-weight: 400;
 }
 
 /* ============================================ */
-/* SYSTEM TITLE */
+/* HEADER RIGHT SECTION */
 /* ============================================ */
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* System Title - New Design */
 .system-title {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 12px 24px;
-  background: linear-gradient(135deg, #1f1f1f 0%, #1a1a1a 100%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  gap: 12px;
+  padding: 10px 20px;
+  background: #0f0f0f;
+  border: 2px solid #1a1a1a;
+  border-radius: 8px;
   position: relative;
   overflow: hidden;
-  box-shadow: 
-    0 4px 12px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .system-title::before {
   content: '';
   position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, 
-    rgba(255, 255, 255, 0.08) 0%, 
-    transparent 50%);
-  pointer-events: none;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #ffffff;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.system-title:hover::before {
+  opacity: 1;
 }
 
 .system-name {
-  font-size: 16px;
-  font-weight: 800;
+  font-size: 15px;
+  font-weight: 700;
   color: #ffffff;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
   text-transform: uppercase;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  background: linear-gradient(135deg, #ffffff 0%, #e0e0e0 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
   position: relative;
   z-index: 1;
 }
 
 .system-version {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  color: #b0b0b0;
-  padding: 5px 12px;
-  background: linear-gradient(135deg, #0f0f0f 0%, #0a0a0a 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  letter-spacing: 0.5px;
+  color: #888888;
+  padding: 4px 10px;
+  background: #1a1a1a;
+  border: 1px solid #222222;
+  border-radius: 6px;
+  letter-spacing: 1px;
   text-transform: uppercase;
-  box-shadow: 
-    inset 0 2px 4px rgba(0, 0, 0, 0.4),
-    0 1px 0 rgba(255, 255, 255, 0.05);
   position: relative;
   z-index: 1;
 }
 
 /* ============================================ */
-/* USER SECTION */
+/* USER SECTION - New Design */
 /* ============================================ */
 
 .user-section {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .user-info {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 18px;
-  background: linear-gradient(135deg, #1f1f1f 0%, #1a1a1a 100%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
+  padding: 10px 16px;
+  background: #0f0f0f;
+  border: 2px solid #1a1a1a;
+  border-radius: 8px;
   color: #ffffff;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  box-shadow: 
-    0 2px 8px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
   position: relative;
   overflow: hidden;
+  transition: all 0.25s ease;
 }
 
 .user-info::before {
   content: '';
   position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, 
-    rgba(255, 255, 255, 0.05) 0%, 
-    transparent 50%);
-  pointer-events: none;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #ffffff;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.user-info:hover {
+  background: #141414;
+  border-color: #2a2a2a;
+}
+
+.user-info:hover::before {
+  opacity: 1;
 }
 
 .user-info svg {
   color: #ffffff;
   flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  position: relative;
+  z-index: 1;
 }
 
 .user-role {
-  color: #c4b5fd;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  text-shadow: 0 0 8px rgba(196, 181, 253, 0.3);
+  color: #aaaaaa;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  position: relative;
+  z-index: 1;
 }
 
-/* ============================================ */
-/* LOGOUT BUTTON */
-/* ============================================ */
-
+/* Logout Button - New Design */
 .logout-button {
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-  border: none;
-  color: white;
-  padding: 11px;
-  border-radius: 10px;
+  background: #0f0f0f;
+  border: 2px solid #1a1a1a;
+  color: #ffffff;
+  padding: 12px;
+  border-radius: 8px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 
-    0 4px 12px rgba(239, 68, 68, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
-    inset 0 -2px 4px rgba(0, 0, 0, 0.2);
+  transition: all 0.25s ease;
   position: relative;
   overflow: hidden;
 }
@@ -299,31 +264,30 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, 
-    rgba(255, 255, 255, 0.2) 0%, 
-    transparent 50%);
+  background: #ffffff;
   opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.logout-button:hover::before {
-  opacity: 1;
+  transition: opacity 0.25s ease;
 }
 
 .logout-button:hover {
-  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
-  transform: translateY(-2px);
-  box-shadow: 
-    0 8px 20px rgba(239, 68, 68, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3),
-    inset 0 -2px 4px rgba(0, 0, 0, 0.2);
+  background: #141414;
+  border-color: #2a2a2a;
+  transform: scale(1.05);
+}
+
+.logout-button:hover::before {
+  opacity: 0.1;
 }
 
 .logout-button:active {
-  transform: translateY(0);
-  box-shadow: 
-    0 4px 12px rgba(239, 68, 68, 0.3),
-    inset 0 2px 4px rgba(0, 0, 0, 0.4);
+  transform: scale(0.98);
+}
+
+.logout-button svg {
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
 }
 
 /* ============================================ */
@@ -332,54 +296,59 @@
 
 @media (max-width: 768px) {
   .header {
-    padding: 0 20px;
+    padding: 0 16px;
     height: 70px;
   }
   
+  .header-left {
+    gap: 12px;
+  }
+  
   .search-input {
-    width: 180px;
+    width: 200px;
   }
   
   .search-input:focus {
-    width: 240px;
+    width: 280px;
   }
   
   .system-title {
-    padding: 10px 16px;
+    padding: 8px 16px;
     gap: 10px;
   }
   
   .system-name {
     font-size: 13px;
+    letter-spacing: 1px;
   }
 
   .system-version {
-    font-size: 10px;
-    padding: 4px 10px;
+    font-size: 9px;
+    padding: 3px 8px;
   }
 
   .user-info {
-    padding: 8px 14px;
-    font-size: 13px;
+    padding: 8px 12px;
+    font-size: 12px;
   }
 
   .logout-button {
-    padding: 9px;
+    padding: 10px;
   }
 }
 
 @media (max-width: 480px) {
   .header {
-    padding: 0 15px;
+    padding: 0 12px;
     height: 65px;
   }
 
   .header-left {
-    gap: 12px;
+    gap: 10px;
   }
 
   .header-right {
-    gap: 10px;
+    gap: 8px;
   }
 
   .search-container {
@@ -387,7 +356,7 @@
   }
   
   .system-title {
-    padding: 8px 12px;
+    padding: 6px 12px;
     gap: 8px;
   }
 
@@ -397,14 +366,19 @@
   }
 
   .system-version {
-    font-size: 9px;
-    padding: 3px 8px;
+    font-size: 8px;
+    padding: 2px 6px;
   }
 
   .user-info {
-    padding: 7px 12px;
-    font-size: 12px;
+    padding: 6px 10px;
+    font-size: 11px;
     gap: 6px;
+  }
+
+  .user-info svg {
+    width: 14px;
+    height: 14px;
   }
 
   .logout-button {
@@ -417,25 +391,6 @@
   }
 
   .icon-button {
-    padding: 8px;
+    padding: 10px;
   }
-}
-
-/* ============================================ */
-/* ANIMATIONS */
-/* ============================================ */
-
-@keyframes shimmer {
-  0% {
-    background-position: -1000px 0;
-  }
-  100% {
-    background-position: 1000px 0;
-  }
-}
-
-/* Optional: Add shimmer effect on system title */
-.system-title:hover .system-name {
-  animation: shimmer 2s infinite linear;
-  background-size: 1000px 100%;
 }

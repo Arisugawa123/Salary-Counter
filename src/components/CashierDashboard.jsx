@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { 
   Plus, 
   Minus, 
@@ -20,8 +20,10 @@ import {
   Percent,
   Save,
   FileText,
-  Lock
+  Lock,
+  Scan
 } from 'lucide-react'
+import { fetchOrders } from '../lib/supabase'
 import './CashierDashboard.css'
 
 // Format number with commas and peso sign
@@ -42,6 +44,8 @@ function CashierDashboard() {
   const [customerCounter, setCustomerCounter] = useState(1)
   const [totalItemsSold, setTotalItemsSold] = useState(0)
   const [showShopOrders, setShowShopOrders] = useState(false)
+  const [barcodeInput, setBarcodeInput] = useState('')
+  const [isScanning, setIsScanning] = useState(false)
   
   // Settings
   const [selectedPrinter, setSelectedPrinter] = useState(localStorage.getItem('selectedPrinter') || 'default')
@@ -57,75 +61,9 @@ function CashierDashboard() {
     { id: 'about', icon: Package, label: 'About System' }
   ]
 
-  // Sample shop orders data with payment tracking
-  const [shopOrders] = useState([
-    { 
-      id: 1, 
-      orderNumber: 'SO-001', 
-      service: 'Sublimation', 
-      customer: 'John Doe', 
-      status: 'Pending Payment', 
-      totalAmount: 2500,
-      paidAmount: 1000,
-      balance: 1500,
-      date: '2024-11-08' 
-    },
-    { 
-      id: 2, 
-      orderNumber: 'SO-002', 
-      service: 'Tarpaulin', 
-      customer: 'Jane Smith', 
-      status: 'Pending Payment', 
-      totalAmount: 3500,
-      paidAmount: 2000,
-      balance: 1500,
-      date: '2024-11-08' 
-    },
-    { 
-      id: 3, 
-      orderNumber: 'SO-003', 
-      service: 'Printing', 
-      customer: 'Bob Johnson', 
-      status: 'Paid', 
-      totalAmount: 1200,
-      paidAmount: 1200,
-      balance: 0,
-      date: '2024-11-07' 
-    },
-    { 
-      id: 4, 
-      orderNumber: 'SO-004', 
-      service: 'Sublimation', 
-      customer: 'Alice Brown', 
-      status: 'Pending Payment', 
-      totalAmount: 1800,
-      paidAmount: 500,
-      balance: 1300,
-      date: '2024-11-07' 
-    },
-    { 
-      id: 5, 
-      orderNumber: 'SO-005', 
-      service: 'Lamination', 
-      customer: 'Charlie Wilson', 
-      status: 'Pending Payment', 
-      totalAmount: 800,
-      paidAmount: 300,
-      balance: 500,
-      date: '2024-11-06' 
-    },
-    { 
-      id: 6, 
-      orderNumber: 'SO-006', 
-      service: 'ID Printing', 
-      customer: 'Diana Lee', 
-      status: 'Paid', 
-      totalAmount: 600,
-      paidAmount: 600,
-      balance: 0,
-      date: '2024-11-06' 
-    },
-  ])
+  // Shop orders from database
+  const [shopOrders, setShopOrders] = useState([])
+  const [loadingOrders, setLoadingOrders] = useState(false)
 
   // Update date and time every second
   useEffect(() => {
@@ -134,6 +72,43 @@ function CashierDashboard() {
     }, 1000)
     return () => clearInterval(timer)
   }, [])
+
+  // Load orders function
+  const loadOrders = useCallback(async () => {
+    try {
+      setLoadingOrders(true)
+      const orders = await fetchOrders()
+      
+      // Map database orders to shop orders format
+      const mappedOrders = orders.map(order => ({
+        id: order.id,
+        orderNumber: `SO-${String(order.id).padStart(3, '0')}`,
+        service: order.orderType || 'N/A',
+        customer: order.customerName || 'N/A',
+        status: order.status || 'Pending Payment',
+        totalAmount: parseFloat(order.totalAmount || 0),
+        paidAmount: parseFloat(order.amountPaid || 0),
+        balance: parseFloat(order.balance || 0),
+        date: order.createdAt ? new Date(order.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        orderId: order.id, // Keep original ID for reference
+        isPahabol: order.isPahabol || false
+      }))
+      
+      setShopOrders(mappedOrders)
+    } catch (error) {
+      console.error('Error loading orders:', error)
+      if (showShopOrders) {
+        alert('Failed to load orders. Please try again.')
+      }
+    } finally {
+      setLoadingOrders(false)
+    }
+  }, [showShopOrders])
+
+  // Fetch orders from database on mount and when shop orders view is shown
+  useEffect(() => {
+    loadOrders()
+  }, [loadOrders])
 
   // Add item to cart
   const addToCart = () => {
@@ -289,6 +264,126 @@ function CashierDashboard() {
     alert(`Added ${order.service} (Balance: ${formatPeso(order.balance)}) to cart`)
   }
 
+  // Parse receipt number to extract order ID
+  // Receipt format: 25-200-049243 (where 049243 is the padded order ID)
+  const parseReceiptNumber = (receiptNo) => {
+    // Remove any whitespace
+    const cleaned = receiptNo.trim()
+    
+    // Check if it matches the format 25-200-XXXXXX
+    const match = cleaned.match(/^25-200-(\d+)$/)
+    if (match) {
+      // Extract the order ID (remove leading zeros)
+      const orderId = parseInt(match[1], 10)
+      return orderId
+    }
+    
+    // If it's just a number, try to use it directly
+    const numericId = parseInt(cleaned, 10)
+    if (!isNaN(numericId)) {
+      return numericId
+    }
+    
+    return null
+  }
+
+  // Handle barcode scan
+  const handleBarcodeScan = async (barcodeValue) => {
+    if (!barcodeValue || barcodeValue.trim() === '') {
+      return
+    }
+
+    setIsScanning(true)
+    
+    try {
+      // Parse the receipt number to get order ID
+      const orderId = parseReceiptNumber(barcodeValue)
+      
+      if (!orderId) {
+        alert('Invalid barcode format. Expected format: 25-200-XXXXXX')
+        setBarcodeInput('')
+        setIsScanning(false)
+        return
+      }
+
+      // Find the order in the shopOrders array
+      let order = shopOrders.find(o => o.orderId === orderId || o.id === orderId)
+      
+      // If not found in current list, fetch orders directly
+      if (!order) {
+        try {
+          const orders = await fetchOrders()
+          const mappedOrders = orders.map(order => ({
+            id: order.id,
+            orderNumber: `SO-${String(order.id).padStart(3, '0')}`,
+            service: order.orderType || 'N/A',
+            customer: order.customerName || 'N/A',
+            status: order.status || 'Pending Payment',
+            totalAmount: parseFloat(order.totalAmount || 0),
+            paidAmount: parseFloat(order.amountPaid || 0),
+            balance: parseFloat(order.balance || 0),
+            date: order.createdAt ? new Date(order.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+            orderId: order.id,
+            isPahabol: order.isPahabol || false
+          }))
+          
+          order = mappedOrders.find(o => o.orderId === orderId || o.id === orderId)
+          
+          // Update shopOrders state for future scans
+          setShopOrders(mappedOrders)
+        } catch (fetchError) {
+          console.error('Error fetching orders:', fetchError)
+        }
+      }
+
+      if (!order) {
+        alert(`Order not found for barcode: ${barcodeValue}\nOrder ID: ${orderId}`)
+        setBarcodeInput('')
+        setIsScanning(false)
+        return
+      }
+
+      // Check if order is already fully paid
+      if (order.balance <= 0) {
+        alert('This order is already fully paid')
+        setBarcodeInput('')
+        setIsScanning(false)
+        return
+      }
+
+      // Check if order is already in cart
+      const existingInCart = cart.find(item => item.orderReference === order.orderNumber)
+      if (existingInCart) {
+        alert(`Order ${order.orderNumber} is already in the cart`)
+        setBarcodeInput('')
+        setIsScanning(false)
+        return
+      }
+
+      // Add order to cart
+      addOrderToCart(order)
+      setBarcodeInput('')
+    } catch (error) {
+      console.error('Error processing barcode scan:', error)
+      alert('Error processing barcode. Please try again.')
+    } finally {
+      setIsScanning(false)
+    }
+  }
+
+  // Handle barcode input change (for manual entry or scanner)
+  const handleBarcodeInputChange = (e) => {
+    setBarcodeInput(e.target.value)
+  }
+
+  // Handle barcode input key press (Enter key or scanner sends Enter)
+  const handleBarcodeKeyPress = (e) => {
+    if (e.key === 'Enter' && barcodeInput.trim()) {
+      e.preventDefault()
+      handleBarcodeScan(barcodeInput)
+    }
+  }
+
   return (
     <div className="cashier-dashboard">
       {/* Main Content Area */}
@@ -325,6 +420,24 @@ function CashierDashboard() {
                 <h2>Cart Items</h2>
                 <span className="item-count">{cart.length} items</span>
               </div>
+
+          {/* Barcode Scanner */}
+          <div className="barcode-scanner-section">
+            <div className="barcode-input-wrapper">
+              <Scan size={20} className="barcode-icon" />
+              <input
+                type="text"
+                placeholder="Scan barcode or enter receipt number (25-200-XXXXXX)"
+                value={barcodeInput}
+                onChange={handleBarcodeInputChange}
+                onKeyPress={handleBarcodeKeyPress}
+                className="barcode-input"
+                disabled={isScanning}
+                autoFocus
+              />
+              {isScanning && <span className="scanning-indicator">Scanning...</span>}
+            </div>
+          </div>
 
           {/* Add Product Form */}
           <div className="add-product-form">
@@ -627,46 +740,71 @@ function CashierDashboard() {
           ) : showShopOrders ? (
             <div className="shop-orders-view">
               <div className="orders-table-container">
-                <table className="orders-table">
-                  <thead>
-                    <tr>
-                      <th>Order #</th>
-                      <th>Service</th>
-                      <th>Customer</th>
-                      <th>Total</th>
-                      <th>Paid</th>
-                      <th>Balance</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shopOrders
-                      .filter(order => order.balance > 0)
-                      .map((order) => (
-                      <tr key={order.id}>
-                        <td className="order-number">{order.orderNumber}</td>
-                        <td className="service-name">{order.service}</td>
-                        <td>{order.customer}</td>
-                        <td className="order-amount">{formatPeso(order.totalAmount)}</td>
-                        <td className="paid-amount">{formatPeso(order.paidAmount)}</td>
-                        <td className="balance-amount">
-                          <span className="has-balance">
-                            {formatPeso(order.balance)}
-                          </span>
-                        </td>
-                        <td>
-                          <button 
-                            className="btn-add-to-cart"
-                            onClick={() => addOrderToCart(order)}
-                          >
-                            <ShoppingCart size={16} />
-                            <span>Add to Cart</span>
-                          </button>
-                        </td>
+                {loadingOrders ? (
+                  <div className="loading-orders">
+                    <p>Loading orders...</p>
+                  </div>
+                ) : shopOrders.length === 0 ? (
+                  <div className="empty-orders">
+                    <Package size={48} />
+                    <p>No orders found</p>
+                    <span>Orders will appear here once created</span>
+                  </div>
+                ) : (
+                  <table className="orders-table">
+                    <thead>
+                      <tr>
+                        <th>Order #</th>
+                        <th>Service</th>
+                        <th>Customer</th>
+                        <th>Total</th>
+                        <th>Paid</th>
+                        <th>Balance</th>
+                        <th>Status</th>
+                        <th>Action</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {shopOrders.map((order) => (
+                        <tr key={order.id}>
+                          <td className="order-number">
+                            {order.orderNumber}
+                            {order.isPahabol && (
+                              <span className="pahabol-badge-small" title="Pahabol (Rush)">P</span>
+                            )}
+                          </td>
+                          <td className="service-name">{order.service}</td>
+                          <td>{order.customer}</td>
+                          <td className="order-amount">{formatPeso(order.totalAmount)}</td>
+                          <td className="paid-amount">{formatPeso(order.paidAmount)}</td>
+                          <td className="balance-amount">
+                            <span className={order.balance > 0 ? 'has-balance' : 'no-balance'}>
+                              {formatPeso(order.balance)}
+                            </span>
+                          </td>
+                          <td className="order-status-cell">
+                            <span className={`status-badge status-${order.status.toLowerCase().replace(' ', '-')}`}>
+                              {order.status}
+                            </span>
+                          </td>
+                          <td>
+                            {order.balance > 0 ? (
+                              <button 
+                                className="btn-add-to-cart"
+                                onClick={() => addOrderToCart(order)}
+                              >
+                                <ShoppingCart size={16} />
+                                <span>Add to Cart</span>
+                              </button>
+                            ) : (
+                              <span className="fully-paid">Fully Paid</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
           ) : (

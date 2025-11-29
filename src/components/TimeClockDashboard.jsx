@@ -22,33 +22,43 @@ const TimeClockDashboard = ({ onExit }) => {
   const [actionHistory, setActionHistory] = useState([]) // Store recent clock actions
   const inputRef = useRef(null)
   const overrideTimerRef = useRef(null)
-  
-  // Trailer carousel state
-  const [activeTrailer, setActiveTrailer] = useState(null)
-  const [selectedTrailer, setSelectedTrailer] = useState(null)
-  const [isFadingOut, setIsFadingOut] = useState(false)
-  const videoRef = useRef(null)
+  const manualOverrideRef = useRef(null) // Ref to track manual override for closures
 
   const trailers = [
     {
       id: 'yotei',
       title: 'Ghost of Yōtei',
+      description: 'Embark on an epic journey through ancient Japan in this action-adventure masterpiece.',
       video: '/trailer.mp4',
       thumbnail: '/yotei-thumb.jpg'
     },
     {
       id: 'battlefield',
       title: 'Battlefield 6',
+      description: 'Experience the next generation of all-out warfare in the most immersive battlefield yet.',
       video: '/battlefield6.mp4',
       thumbnail: '/bf6-thumb.png'
     },
     {
       id: 'gta6',
       title: 'Grand Theft Auto VI',
+      description: 'Return to Vice City in the most ambitious and immersive GTA experience ever created.',
       video: '/gta6.mp4',
       thumbnail: '/gta6-thumb.webp'
+    },
+    {
+      id: 'grey-state',
+      title: 'Grey State',
+      description: 'A thrilling sci-fi adventure where reality and simulation blur in a dystopian future.',
+      video: '/grey-state-trailer.mp4',
+      thumbnail: '/grey-state-thumb.jpg'
     }
   ]
+  
+  // Trailer player state - start with random trailer
+  const [activeTrailer, setActiveTrailer] = useState(() => Math.floor(Math.random() * trailers.length))
+  const [isFadingOut, setIsFadingOut] = useState(false)
+  const videoRef = useRef(null)
 
   // Update current time every second
   useEffect(() => {
@@ -150,23 +160,42 @@ const TimeClockDashboard = ({ onExit }) => {
     setLastScannedEmployee(employee)
 
     // Determine action based on highlighted button
-    const highlightedButton = getHighlightedButton()
+    // IMPORTANT: Use ref to get latest manualOverride value (avoids stale closure issues)
+    const currentManualOverride = manualOverrideRef.current
+    const highlightedButton = currentManualOverride || getHighlightedButton()
     const isOutButton = highlightedButton === 'am-out' || highlightedButton === 'pm-out' || highlightedButton === 'ot-out'
+    const isInButton = highlightedButton === 'am-in' || highlightedButton === 'pm-in' || highlightedButton === 'ot-in'
     
     // Check if employee is currently clocked in - use ref to get latest state
     const existingRecord = clockRecordsRef.current.find(
       record => record.employee_id === employee.id && !record.clock_out
     )
 
+    // Debug logging
+    console.log('Process barcode:', {
+      currentManualOverride,
+      highlightedButton,
+      isOutButton,
+      isInButton,
+      hasExistingRecord: !!existingRecord,
+      employeeName: employee.name
+    })
+
     if (isOutButton && existingRecord) {
       // Clock OUT - only if it's an OUT time period and they're clocked in
       await handleClockOut(existingRecord, employee)
-    } else if (!isOutButton) {
-      // Clock IN - for AM IN, PM IN, OT IN
+    } else if (isInButton && !existingRecord) {
+      // Clock IN - for AM IN, PM IN, OT IN (only if not already clocked in)
       await handleClockIn(employee)
-    } else {
+    } else if (isInButton && existingRecord) {
+      // They tried to clock in but are already clocked in
+      showNotification('Cannot clock in. Employee is already clocked in. Please clock out first.', 'error', employee.name)
+    } else if (isOutButton && !existingRecord) {
       // They tried to clock out but aren't clocked in
       showNotification('Cannot clock out. Employee is not clocked in.', 'error', employee.name)
+    } else {
+      // No button selected or invalid state
+      showNotification('Please select a time period (AM IN, PM IN, etc.) before scanning.', 'error', employee.name)
     }
   }
 
@@ -520,7 +549,9 @@ const TimeClockDashboard = ({ onExit }) => {
   // Determine which button should be highlighted based on current time
   const getHighlightedButton = () => {
     // If manual override is active, return the override button
+    // Use a ref to get the latest value since this might be called from event handlers
     if (manualOverride) {
+      console.log('Using manual override:', manualOverride)
       return manualOverride
     }
     
@@ -558,8 +589,9 @@ const TimeClockDashboard = ({ onExit }) => {
       clearInterval(overrideTimerRef.current)
     }
     
-    // Set manual override
+    // Set manual override in both state and ref
     setManualOverride(buttonType)
+    manualOverrideRef.current = buttonType
     setOverrideCountdown(20)
     
     // Start countdown
@@ -569,6 +601,7 @@ const TimeClockDashboard = ({ onExit }) => {
           // Timer expired, clear override
           clearInterval(overrideTimerRef.current)
           setManualOverride(null)
+          manualOverrideRef.current = null
           return 0
         }
         return prev - 1
@@ -639,33 +672,19 @@ const TimeClockDashboard = ({ onExit }) => {
     return () => window.removeEventListener('keydown', handleEsc)
   }, [onExit])
 
-  // Auto-carousel effect for trailers
-  useEffect(() => {
-    let selectionTimeout
 
-    if (activeTrailer === null && selectedTrailer === null && !isFadingOut) {
-      selectionTimeout = setTimeout(() => {
-        const randomIndex = Math.floor(Math.random() * trailers.length)
-        setSelectedTrailer(randomIndex)
-        
-        setTimeout(() => {
-          setActiveTrailer(randomIndex)
-          setSelectedTrailer(null)
-        }, 2000)
-      }, 5000)
-    }
-
-    return () => {
-      if (selectionTimeout) clearTimeout(selectionTimeout)
-    }
-  }, [activeTrailer, selectedTrailer, isFadingOut, trailers.length])
-
-  // Handle video ended event
+  // Handle video ended event - play next random trailer
   const handleVideoEnded = () => {
     setIsFadingOut(true)
     
     setTimeout(() => {
-      setActiveTrailer(null)
+      // Select a random trailer (different from current)
+      let nextIndex
+      do {
+        nextIndex = Math.floor(Math.random() * trailers.length)
+      } while (nextIndex === activeTrailer && trailers.length > 1)
+      
+      setActiveTrailer(nextIndex)
       setIsFadingOut(false)
     }, 500)
   }
@@ -688,106 +707,111 @@ const TimeClockDashboard = ({ onExit }) => {
     <div className="time-clock-dashboard">
       {/* Header */}
       <div className="clock-header">
-        <div className="clock-logo">
-          <Clock size={24} />
-          <h2>TIME CLOCK SYSTEM</h2>
+        <div className="clock-header-content">
+          <div className="clock-logo">
+            <div className="clock-icon-wrapper">
+              <Clock size={28} />
+            </div>
+            <div className="clock-title-group">
+              <h1 className="clock-title">TIME CLOCK SYSTEM</h1>
+              <span className="clock-subtitle">Employee Attendance Management</span>
+            </div>
+          </div>
+          <div className="clock-header-divider"></div>
+          <button className="exit-btn" onClick={onExit}>
+            <X size={18} />
+            <span>Exit</span>
+            <kbd className="exit-keyboard-hint">ESC</kbd>
+          </button>
         </div>
-        <button className="exit-btn" onClick={onExit}>
-          <X size={18} />
-          <span>Exit (ESC)</span>
-        </button>
       </div>
 
       {/* Main Content Area */}
       <div className="clock-content">
-        {/* Left Panel - Scanner and Current Time */}
+        {/* Left Panel - Compact Redesign */}
         <div className="clock-left-panel">
-          <div className="panel-header">
-            <Zap size={24} />
-            <h2>Barcode Scanner</h2>
-          </div>
-
-          {/* Digital Clock */}
-          <div className="digital-time">
-            <div className="time-large">
-              {currentTime.toLocaleTimeString('en-US', {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: true
-              })}
-            </div>
-            <div className="date-small">
-              {formatDate(currentTime)}
-            </div>
-          </div>
-
-          {/* Barcode Input - Hidden but still functional */}
-          <div className="barcode-section hidden">
-            <input
-              ref={inputRef}
-              type="password"
-              value={barcodeInput}
-              onChange={(e) => setBarcodeInput(e.target.value)}
-              onKeyPress={handleBarcodeInput}
-              placeholder="Scan barcode..."
-              className="barcode-input"
-              autoFocus
-            />
-            <p className="scan-hint">Ready to scan</p>
-          </div>
-
-          {/* Time Stamp Selection */}
-          <div className="quick-entry-section">
-            <h3 className="section-title-sm">Time Stamp Selection</h3>
-            
-            {/* Countdown Indicator */}
-            {manualOverride && overrideCountdown > 0 && (
-              <div className="override-indicator">
-                <span className="override-text">Manual selection active</span>
-                <span className="override-countdown">{overrideCountdown}s</span>
+          {/* Top Section: Clock & Scanner */}
+          <div className="left-panel-top">
+            <div className="compact-clock-section">
+              <div className="compact-time-display">
+                <div className="compact-time">
+                  {currentTime.toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: true
+                  })}
+                </div>
+                <div className="compact-date">{formatDate(currentTime)}</div>
               </div>
-            )}
+            </div>
             
-            {/* All buttons in one row */}
-            <div className="shift-buttons">
+            {/* Barcode Input - Hidden but still functional */}
+            <div className="barcode-section hidden">
+              <input
+                ref={inputRef}
+                type="password"
+                value={barcodeInput}
+                onChange={(e) => setBarcodeInput(e.target.value)}
+                onKeyPress={handleBarcodeInput}
+                placeholder="Scan barcode..."
+                className="barcode-input"
+                autoFocus
+              />
+            </div>
+          </div>
+
+          {/* Middle Section: Quick Actions */}
+          <div className="left-panel-middle">
+            <div className="actions-header">
+              <Activity size={16} />
+              <span>Quick Actions</span>
+              {manualOverride && overrideCountdown > 0 && (
+                <div className="compact-override">
+                  <Zap size={12} />
+                  <span>{overrideCountdown}s</span>
+                </div>
+              )}
+            </div>
+            
+            <div className="compact-buttons-grid">
               <button 
-                className={`quick-btn am-in ${getHighlightedButton() === 'am-in' ? 'highlighted' : ''}`} 
+                className={`action-btn am-in ${getHighlightedButton() === 'am-in' ? 'highlighted' : ''}`} 
                 onClick={() => handleQuickAction('in', 'am-in')}
               >
                 <LogIn size={16} />
                 <span>AM IN</span>
               </button>
               <button 
-                className={`quick-btn am-out ${getHighlightedButton() === 'am-out' ? 'highlighted' : ''}`} 
+                className={`action-btn am-out ${getHighlightedButton() === 'am-out' ? 'highlighted' : ''}`} 
                 onClick={() => handleQuickAction('out', 'am-out')}
               >
                 <LogOut size={16} />
                 <span>AM OUT</span>
               </button>
               <button 
-                className={`quick-btn pm-in ${getHighlightedButton() === 'pm-in' ? 'highlighted' : ''}`} 
+                className={`action-btn pm-in ${getHighlightedButton() === 'pm-in' ? 'highlighted' : ''}`} 
                 onClick={() => handleQuickAction('in', 'pm-in')}
               >
                 <LogIn size={16} />
                 <span>PM IN</span>
               </button>
               <button 
-                className={`quick-btn pm-out ${getHighlightedButton() === 'pm-out' ? 'highlighted' : ''}`} 
+                className={`action-btn pm-out ${getHighlightedButton() === 'pm-out' ? 'highlighted' : ''}`} 
                 onClick={() => handleQuickAction('out', 'pm-out')}
               >
                 <LogOut size={16} />
                 <span>PM OUT</span>
               </button>
               <button 
-                className={`quick-btn ot-in ${getHighlightedButton() === 'ot-in' ? 'highlighted' : ''}`} 
+                className={`action-btn ot-in ${getHighlightedButton() === 'ot-in' ? 'highlighted' : ''}`} 
                 onClick={() => handleQuickAction('in', 'ot-in')}
               >
                 <Zap size={16} />
                 <span>OT IN</span>
               </button>
               <button 
-                className={`quick-btn ot-out ${getHighlightedButton() === 'ot-out' ? 'highlighted' : ''}`} 
+                className={`action-btn ot-out ${getHighlightedButton() === 'ot-out' ? 'highlighted' : ''}`} 
                 onClick={() => handleQuickAction('out', 'ot-out')}
               >
                 <Zap size={16} />
@@ -796,150 +820,101 @@ const TimeClockDashboard = ({ onExit }) => {
             </div>
           </div>
 
-          {/* Trailer Carousel */}
-          <div className="trailer-section">
+          {/* Bottom Section: Entertainment */}
+          <div className="left-panel-bottom">
             <div className="trailer-carousel-mini">
-              {activeTrailer === null ? (
-                <div className="trailer-thumbs">
-                  {trailers.map((trailer, index) => (
-                    <div 
-                      key={trailer.id}
-                      className={`trailer-thumb ${
-                        selectedTrailer === index ? 'selected' : 
-                        selectedTrailer !== null ? 'hidden' : ''
-                      }`}
-                      onClick={() => {
-                        if (!selectedTrailer && !activeTrailer) {
-                          setSelectedTrailer(index)
-                          setTimeout(() => {
-                            setActiveTrailer(index)
-                            setSelectedTrailer(null)
-                          }, 2000)
-                        }
-                      }}
-                      style={{ backgroundImage: `url(${trailer.thumbnail})` }}
-                    >
-                      <div className="thumb-overlay">
-                        <div className="play-btn-mini">
-                          <Play size={24} fill="#ffffff" />
-                        </div>
-                        <div className="thumb-title">{trailer.title}</div>
-                      </div>
-                    </div>
-                  ))}
+              <div className={`trailer-player-mini ${isFadingOut ? 'fading-out' : ''}`}>
+                <video 
+                  ref={videoRef}
+                  className="trailer-video-mini"
+                  autoPlay
+                  muted
+                  playsInline
+                  onEnded={handleVideoEnded}
+                  key={activeTrailer}
+                >
+                  <source src={trailers[activeTrailer].video} type="video/mp4" />
+                </video>
+                {/* Lower Third Overlay */}
+                <div className="trailer-lower-third">
+                  <div className="lower-third-label">NEW GAME TRAILER</div>
+                  <div className="lower-third-title">{trailers[activeTrailer].title}</div>
+                  <div className="lower-third-description">{trailers[activeTrailer].description}</div>
                 </div>
-              ) : (
-                <div className={`trailer-player-mini ${isFadingOut ? 'fading-out' : ''}`}>
-                  <video 
-                    ref={videoRef}
-                    className="trailer-video-mini"
-                    autoPlay
-                    muted
-                    playsInline
-                    onEnded={handleVideoEnded}
-                    key={activeTrailer}
-                  >
-                    <source src={trailers[activeTrailer].video} type="video/mp4" />
-                  </video>
-                </div>
-              )}
+              </div>
             </div>
           </div>
         </div>
 
         {/* Right Side - Container for two separate panels */}
         <div className="clock-right-side">
-          {/* Recent Action Panel - Always visible */}
+          {/* Recent Action Panel - Redesigned */}
           <div className="recent-action-panel">
-            {(recentAction || lastScannedEmployee) ? (
-              <div className={`recent-action-card ${recentAction ? (recentAction.type === 'in' ? 'clock-in' : 'clock-out') : 'info-only'}`}>
-                {recentAction ? (
-                  <>
-                    <div className="action-card-header">
-                      <div className="action-icon">
-                        {recentAction.type === 'in' ? (
-                          <LogIn size={32} />
-                        ) : (
-                          <LogOut size={32} />
-                        )}
-                      </div>
-                      <div className="action-info">
-                        <div className="action-type">
-                          {recentAction.type === 'in' ? 'CLOCKED IN' : 'CLOCKED OUT'}
-                        </div>
-                        <div className="action-time">{formatTime(recentAction.time)}</div>
-                      </div>
-                    </div>
-                    
-                    <div className="action-card-body">
-                      <div className="action-employee">
-                        <div className="action-avatar">
-                          <User size={40} />
-                        </div>
-                        <div className="action-details">
-                          <div className="action-name">{recentAction.employee.name}</div>
-                          {recentAction.type === 'in' ? (
-                            <div className="action-shift">
-                              <span className={`shift-badge ${recentAction.shiftType}`}>
-                                {recentAction.shift} Shift
-                              </span>
-                            </div>
-                          ) : (
-                            <div className="action-duration">
-                              Duration: <strong>{recentAction.duration}</strong>
-                            </div>
-                          )}
-                        </div>
-                      </div>
+            {recentAction ? (
+              <div className={`recent-action-card ${recentAction.type === 'in' ? 'clock-in' : 'clock-out'}`}>
+                <div className="action-top-bar">
+                  <div className="action-status-badge">
+                    {recentAction.type === 'in' ? (
+                      <LogIn size={14} />
+                    ) : (
+                      <LogOut size={14} />
+                    )}
+                    <span>{recentAction.type === 'in' ? 'CLOCKED IN' : 'CLOCKED OUT'}</span>
+                  </div>
+                  <div className="action-time-badge">{formatTime(recentAction.time)}</div>
+                </div>
 
-                      {/* DTR Record Display */}
-                      {recentAction.dtr && (
-                        <div className="dtr-display">
-                          <div className="dtr-header">
-                            <Calendar size={16} />
-                            <span>Today's Record - Day {recentAction.dtr.day_of_month}</span>
-                          </div>
-                          <div className="dtr-grid">
-                            <div className="dtr-entry">
-                              <span className="dtr-label">AM IN</span>
-                              <span className="dtr-value">{recentAction.dtr.am_in || '--:--'}</span>
-                            </div>
-                            <div className="dtr-entry">
-                              <span className="dtr-label">AM OUT</span>
-                              <span className="dtr-value">{recentAction.dtr.am_out || '--:--'}</span>
-                            </div>
-                            <div className="dtr-entry">
-                              <span className="dtr-label">PM IN</span>
-                              <span className="dtr-value">{recentAction.dtr.pm_in || '--:--'}</span>
-                            </div>
-                            <div className="dtr-entry">
-                              <span className="dtr-label">PM OUT</span>
-                              <span className="dtr-value">{recentAction.dtr.pm_out || '--:--'}</span>
-                            </div>
-                            <div className="dtr-entry">
-                              <span className="dtr-label">OT IN</span>
-                              <span className="dtr-value">{recentAction.dtr.ot_in || '--:--'}</span>
-                            </div>
-                            <div className="dtr-entry">
-                              <span className="dtr-label">OT OUT</span>
-                              <span className="dtr-value">{recentAction.dtr.ot_out || '--:--'}</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div className="employee-info-only">
-                    <div className="action-employee">
-                      <div className="action-avatar">
-                        <User size={40} />
+                <div className="action-employee-compact">
+                  <div className="employee-avatar-compact">
+                    <User size={24} />
+                  </div>
+                  <div className="employee-info-compact">
+                    <div className="employee-name-compact">{recentAction.employee.name}</div>
+                    {recentAction.type === 'in' ? (
+                      <div className="employee-shift-compact">
+                        <span className={`shift-tag ${recentAction.shiftType}`}>
+                          {recentAction.shift} Shift
+                        </span>
                       </div>
-                      <div className="action-details">
-                        <div className="action-name">
-                          {recentAction ? recentAction.employee.name : lastScannedEmployee.name}
-                        </div>
-                        <div className="employee-status">Ready to scan</div>
+                    ) : (
+                      <div className="employee-duration-compact">
+                        Duration: <strong>{recentAction.duration}</strong>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* DTR Record Display - Compact */}
+                {recentAction.dtr && (
+                  <div className="dtr-display-compact">
+                    <div className="dtr-header-compact">
+                      <Calendar size={12} />
+                      <span>Day {recentAction.dtr.day_of_month}</span>
+                    </div>
+                    <div className="dtr-grid-compact">
+                      <div className="dtr-item-compact">
+                        <span className="dtr-label-compact">AM IN</span>
+                        <span className="dtr-value-compact">{recentAction.dtr.am_in || '--'}</span>
+                      </div>
+                      <div className="dtr-item-compact">
+                        <span className="dtr-label-compact">AM OUT</span>
+                        <span className="dtr-value-compact">{recentAction.dtr.am_out || '--'}</span>
+                      </div>
+                      <div className="dtr-item-compact">
+                        <span className="dtr-label-compact">PM IN</span>
+                        <span className="dtr-value-compact">{recentAction.dtr.pm_in || '--'}</span>
+                      </div>
+                      <div className="dtr-item-compact">
+                        <span className="dtr-label-compact">PM OUT</span>
+                        <span className="dtr-value-compact">{recentAction.dtr.pm_out || '--'}</span>
+                      </div>
+                      <div className="dtr-item-compact">
+                        <span className="dtr-label-compact">OT IN</span>
+                        <span className="dtr-value-compact">{recentAction.dtr.ot_in || '--'}</span>
+                      </div>
+                      <div className="dtr-item-compact">
+                        <span className="dtr-label-compact">OT OUT</span>
+                        <span className="dtr-value-compact">{recentAction.dtr.ot_out || '--'}</span>
                       </div>
                     </div>
                   </div>
@@ -947,13 +922,11 @@ const TimeClockDashboard = ({ onExit }) => {
               </div>
             ) : (
               <div className="recent-action-card empty">
-                <div className="empty-state">
-                  <div className="empty-icon">
-                    <Activity size={48} />
-                  </div>
-                  <div className="empty-text">
-                    <h3>No Recent Activity</h3>
-                    <p>Scan a barcode to clock in or out</p>
+                <div className="empty-state-compact">
+                  <Activity size={32} />
+                  <div className="empty-text-compact">
+                    <span className="empty-title">No Activity</span>
+                    <span className="empty-subtitle">Scan barcode to start</span>
                   </div>
                 </div>
               </div>
