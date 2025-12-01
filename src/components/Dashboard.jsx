@@ -2463,13 +2463,25 @@ function Dashboard({ activeView, setActiveView }) {
   }
 
   const getEmployeeDayOffHoursForPeriod = (employeeId, month, year, payPeriod) => {
-    const employeeDayOffs = dayOffRecords.filter(record => 
+    // Business rule: Day off is only paid on the SECOND cut‑off (16–31).
+    // So:
+    // - For the first period (1–15), we DO NOT add any paid day off hours.
+    // - For the second period (16–31), we add all qualified day off hours
+    //   for the whole month, regardless of the actual day or stored payPeriod.
+
+    // If we are computing the first cut‑off, skip day off pay entirely.
+    if (payPeriod === '1-15') {
+      return 0
+    }
+
+    // For the second cut‑off, include all qualified day offs in that month.
+    const employeeDayOffs = dayOffRecords.filter(record =>
       record.employeeId === employeeId &&
       record.month === month &&
       record.year === year &&
-      record.payPeriod === payPeriod &&
       record.isQualified
     )
+
     return employeeDayOffs.reduce((total, record) => total + (record.hoursPaid || 0), 0)
   }
 

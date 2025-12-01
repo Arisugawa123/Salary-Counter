@@ -1,8 +1,15 @@
 import { createClient } from '@supabase/supabase-js'
 
-// Get environment variables
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+// Get environment variables with sensible fallbacks
+const supabaseUrl =
+  import.meta.env.VITE_SUPABASE_URL ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_URL ||
+  'https://qirdmerhzyaxlbbanxmd.supabase.co'
+
+const supabaseAnonKey =
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpcmRtZXJoenlheGxiYmFueG1kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIwMTU3MDIsImV4cCI6MjA3NzU5MTcwMn0.s7rg2WTu7-bUwjV3RWtRObJiPQwqWVlSphS2zmLpbps'
 
 // Validate environment variables
 if (!supabaseUrl || !supabaseAnonKey) {
