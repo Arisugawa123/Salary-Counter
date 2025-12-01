@@ -217,6 +217,113 @@
   height: 0 !important;
 }
 
+.dayoff-toggle-card {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px;
+  background: #121212;
+  border: 1px solid #2a2a2a;
+  border-radius: 16px;
+}
+
+.dayoff-toggle-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dayoff-toggle-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dayoff-toggle-title-row span:first-child {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.dayoff-toggle-hours {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.dayoff-toggle-hours.available {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.25);
+}
+
+.dayoff-toggle-hours.empty {
+  color: #f97316;
+  background: rgba(249, 115, 22, 0.1);
+  border: 1px solid rgba(249, 115, 22, 0.3);
+}
+
+.dayoff-toggle-description {
+  font-size: 12px;
+  color: #aaaaaa;
+  margin: 0;
+}
+
+.dayoff-toggle-switch {
+  position: relative;
+  width: 56px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.dayoff-toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.dayoff-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #1f1f1f;
+  border: 1px solid #333333;
+  border-radius: 999px;
+  transition: all 0.2s ease;
+}
+
+.dayoff-toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: #ffffff;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+
+.dayoff-toggle-switch input:checked + .dayoff-toggle-slider {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  border-color: transparent;
+}
+
+.dayoff-toggle-switch input:checked + .dayoff-toggle-slider::before {
+  transform: translate(22px, -50%);
+}
+
+.dayoff-toggle-switch input:disabled + .dayoff-toggle-slider {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* Commissions Container */
 .commissions-container {
   background: #111111;
@@ -473,6 +580,16 @@
 .summary-row.day-off-row strong {
   color: #4ade80;
   font-weight: 700;
+}
+
+.summary-row.day-off-row.disabled {
+  background: rgba(156, 163, 175, 0.1);
+  border-color: rgba(156, 163, 175, 0.3);
+}
+
+.summary-row.day-off-row.disabled span,
+.summary-row.day-off-row.disabled strong {
+  color: #9ca3af;
 }
 
 .summary-net-pay {

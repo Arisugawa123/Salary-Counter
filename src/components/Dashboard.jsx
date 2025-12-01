@@ -105,6 +105,7 @@ function Dashboard({ activeView, setActiveView }) {
   const [rushTarpCount, setRushTarpCount] = useState(0)
   const [regularCommissionCount, setRegularCommissionCount] = useState(0)
   const [cashAdvance, setCashAdvance] = useState(0)
+  const [applyDayOffPay, setApplyDayOffPay] = useState(true)
 
   // Settings
   const [defaultHoursPerShift, setDefaultHoursPerShift] = useState(9)
@@ -278,6 +279,7 @@ function Dashboard({ activeView, setActiveView }) {
               setSelectedEmployee(null)
               setSearchQuery('')
               setShowTimeTracker(false)
+              setApplyDayOffPay(true)
             }
           }
         }
@@ -622,16 +624,20 @@ function Dashboard({ activeView, setActiveView }) {
       }
     })
     
-    // Add day off hours if any (from the original record)
+    const baseRegularHours = totalRegularHours
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
-    const dayOffHours = getEmployeeDayOffHoursForPeriod(employee.id, record.month, record.year, record.payPeriod)
-    totalRegularHours += dayOffHours
+    const shouldApplyDayOff = didRecordApplyDayOffPay(record, employee, baseRegularHours)
+    const dayOffHours = shouldApplyDayOff
+      ? getEmployeeDayOffHoursForPeriod(employee.id, record.month, record.year, record.payPeriod)
+      : 0
     
-    const totalHours = totalRegularHours + totalOvertimeHours
+    // Calculate total hours (regular + overtime + day off)
+    const totalHours = totalRegularHours + totalOvertimeHours + dayOffHours
     const hourlyRate = employee.ratePer9Hours / employee.hoursPerShift
     const regularPay = totalRegularHours * hourlyRate
     const overtimePay = totalOvertimeHours * hourlyRate
-    const grossPay = regularPay + overtimePay
+    const dayOffPay = dayOffHours * hourlyRate
+    const grossPay = regularPay + overtimePay + dayOffPay
     
     // Commissions (keep original values)
     const rushTarpCommission = (record.rushTarpCount || 0) * rushTarpCommissionRate
@@ -663,6 +669,7 @@ function Dashboard({ activeView, setActiveView }) {
     return {
       regularPay: regularPay.toFixed(2),
       overtimePay: Math.abs(overtimePay).toFixed(2),
+      dayOffPay: dayOffPay.toFixed(2),
       grossPay: grossPay.toFixed(2),
       rushTarpCommission: rushTarpCommission.toFixed(2),
       regularCommission: regularCommission.toFixed(2),
@@ -749,6 +756,23 @@ function Dashboard({ activeView, setActiveView }) {
     }
     
     return { regularHours, overtimeHours }
+  }
+
+  const getBaseRegularHoursFromEntries = (entries = {}, employee) => {
+    if (!employee) return 0
+    return Object.values(entries).reduce((total, dayEntry) => {
+      const dayHours = calculateDayHoursForRecord(dayEntry, employee)
+      return total + dayHours.regularHours
+    }, 0)
+  }
+
+  const didRecordApplyDayOffPay = (record, employee, baseRegularHours) => {
+    if (!record || !employee) return false
+    const comparisonBase = typeof baseRegularHours === 'number'
+      ? baseRegularHours
+      : getBaseRegularHoursFromEntries(record.timeEntries, employee)
+    const recordedRegularHours = Number(record.regularHours || 0)
+    return recordedRegularHours - comparisonBase > 0.01
   }
 
   const handleDeleteEmployee = async (id) => {
@@ -888,7 +912,9 @@ function Dashboard({ activeView, setActiveView }) {
     setRegularCommissionCount(0)
     setCustomCommissionCounts({})
     setCashAdvance(0)
+    setApplyDayOffPay(true)
     setEditingPayrollRecordId(null)
+    setApplyDayOffPay(true)
   }
 
   const handleSearchChange = (e) => {
@@ -897,6 +923,7 @@ function Dashboard({ activeView, setActiveView }) {
     if (!e.target.value) {
       setSelectedEmployee(null)
       setShowTimeTracker(false)
+      setApplyDayOffPay(true)
     }
   }
 
@@ -1104,6 +1131,7 @@ function Dashboard({ activeView, setActiveView }) {
     if (!selectedEmployee) return { 
       regularPay: 0, 
       overtimePay: 0, 
+      dayOffPay: 0,
       grossPay: 0,
       rushTarpCommission: 0,
       regularCommission: 0,
@@ -1115,7 +1143,9 @@ function Dashboard({ activeView, setActiveView }) {
       totalOvertimeHours: 0,
       lateMinutes: 0,
       lateDeduction: 0,
-      dayOffHours: 0
+      dayOffHours: 0,
+      dayOffHoursAvailable: 0,
+      dayOffPayApplied: false
     }
     
     let totalRegularHours = 0
@@ -1130,15 +1160,16 @@ function Dashboard({ activeView, setActiveView }) {
     // Add day off hours for the current period
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
     const currentMonth = monthNames[selectedMonth]
-    const dayOffHours = getEmployeeDayOffHoursForPeriod(selectedEmployee.id, currentMonth, selectedYear, payPeriod)
+    const dayOffHoursAvailable = getEmployeeDayOffHoursForPeriod(selectedEmployee.id, currentMonth, selectedYear, payPeriod)
+    const dayOffHoursApplied = applyDayOffPay ? dayOffHoursAvailable : 0
     
-    totalRegularHours += dayOffHours
-    
-    const totalHours = totalRegularHours + totalOvertimeHours
+    // Calculate total hours (regular + overtime + day off)
+    const totalHours = totalRegularHours + totalOvertimeHours + dayOffHoursApplied
     const hourlyRate = selectedEmployee.ratePer9Hours / selectedEmployee.hoursPerShift
     const regularPay = totalRegularHours * hourlyRate
     const overtimePay = totalOvertimeHours * hourlyRate // Same rate as regular hours
-    const grossPay = regularPay + overtimePay
+    const dayOffPay = dayOffHoursApplied * hourlyRate
+    const grossPay = regularPay + overtimePay + dayOffPay
     
     // Commissions (using settings values)
     const rushTarpCommission = rushTarpCount * rushTarpCommissionRate
@@ -1169,6 +1200,7 @@ function Dashboard({ activeView, setActiveView }) {
     return {
       regularPay: regularPay.toFixed(2),
       overtimePay: Math.abs(overtimePay).toFixed(2),
+      dayOffPay: dayOffPay.toFixed(2),
       grossPay: grossPay.toFixed(2),
       rushTarpCommission: rushTarpCommission.toFixed(2),
       regularCommission: regularCommission.toFixed(2),
@@ -1181,7 +1213,9 @@ function Dashboard({ activeView, setActiveView }) {
       totalOvertimeHours: Math.abs(totalOvertimeHours).toFixed(2),
       lateMinutes: lateMinutes,
       lateDeduction: lateDeduction.toFixed(2),
-      dayOffHours: dayOffHours.toFixed(2)
+      dayOffHours: dayOffHoursApplied.toFixed(2),
+      dayOffHoursAvailable: dayOffHoursAvailable.toFixed(2),
+      dayOffPayApplied: applyDayOffPay
     }
   }
 
@@ -1465,6 +1499,9 @@ function Dashboard({ activeView, setActiveView }) {
     setRegularCommissionCount(record.regularCommissionCount || 0)
     setCustomCommissionCounts(record.customCommissionCounts || {})
     setCashAdvance(record.cashAdvance || 0)
+    const baseRegularHours = getBaseRegularHoursFromEntries(record.timeEntries || {}, employee)
+    const recordedRegularHours = Number(record.regularHours || 0)
+    setApplyDayOffPay(recordedRegularHours - baseRegularHours > 0.01)
     
     // Store the record ID for updating instead of creating new
     setEditingPayrollRecordId(record.id)
@@ -2463,22 +2500,11 @@ function Dashboard({ activeView, setActiveView }) {
   }
 
   const getEmployeeDayOffHoursForPeriod = (employeeId, month, year, payPeriod) => {
-    // Business rule: Day off is only paid on the SECOND cut‑off (16–31).
-    // So:
-    // - For the first period (1–15), we DO NOT add any paid day off hours.
-    // - For the second period (16–31), we add all qualified day off hours
-    //   for the whole month, regardless of the actual day or stored payPeriod.
-
-    // If we are computing the first cut‑off, skip day off pay entirely.
-    if (payPeriod === '1-15') {
-      return 0
-    }
-
-    // For the second cut‑off, include all qualified day offs in that month.
     const employeeDayOffs = dayOffRecords.filter(record =>
       record.employeeId === employeeId &&
       record.month === month &&
       record.year === year &&
+      record.payPeriod === payPeriod &&
       record.isQualified
     )
 
@@ -3131,6 +3157,9 @@ function Dashboard({ activeView, setActiveView }) {
   }
 
   const stats = totalStats()
+  const earningsSnapshot = calculateTotalEarnings()
+  const dayOffHoursAvailableValue = parseFloat(earningsSnapshot.dayOffHoursAvailable || 0)
+  const dayOffHoursAppliedValue = parseFloat(earningsSnapshot.dayOffHours || 0)
 
   // Custom Success Popup Component
   const SuccessPopup = () => {
@@ -3226,6 +3255,7 @@ function Dashboard({ activeView, setActiveView }) {
                   setSelectedEmployee(null)
                   setSearchQuery('')
                   setShowTimeTracker(false)
+                  setApplyDayOffPay(true)
                 }}>
                   <X size={16} />
                 </button>
@@ -3421,17 +3451,17 @@ function Dashboard({ activeView, setActiveView }) {
                   <div className="late-display">
                     <div className="late-info-row">
                       <span className="late-label">Total Late (Minutes):</span>
-                      <span className="late-value">{calculateTotalEarnings().lateMinutes} min</span>
+                      <span className="late-value">{earningsSnapshot.lateMinutes} min</span>
                     </div>
                     <div className="late-info-row">
                       <span className="late-label">Late Deduction Amount:</span>
-                      <span className="late-value negative">-{formatPeso(calculateTotalEarnings().lateDeduction)}</span>
+                      <span className="late-value negative">-{formatPeso(earningsSnapshot.lateDeduction)}</span>
                     </div>
                   </div>
-                  {calculateTotalEarnings().lateMinutes > 0 && (
+                  {earningsSnapshot.lateMinutes > 0 && (
                     <div className="late-summary">
-                      <span>⚠️ Late: {calculateTotalEarnings().lateMinutes} minutes @ ₱{lateDeductionRate}/min</span>
-                      <span className="late-amount">-{formatPeso(calculateTotalEarnings().lateDeduction)}</span>
+                      <span>⚠️ Late: {earningsSnapshot.lateMinutes} minutes @ ₱{lateDeductionRate}/min</span>
+                      <span className="late-amount">-{formatPeso(earningsSnapshot.lateDeduction)}</span>
                     </div>
                   )}
                 </div>
@@ -3449,6 +3479,35 @@ function Dashboard({ activeView, setActiveView }) {
           <div className="right-column">
             {selectedEmployee && (
               <>
+                <div className="dayoff-toggle-card">
+                  <div className="dayoff-toggle-info">
+                    <div className="dayoff-toggle-title-row">
+                      <span>Apply Paid Day Off</span>
+                      <span className={`dayoff-toggle-hours ${dayOffHoursAvailableValue > 0 ? 'available' : 'empty'}`}>
+                        {dayOffHoursAvailableValue > 0
+                          ? `${dayOffHoursAvailableValue.toFixed(2)} hrs available`
+                          : 'No qualified hours'}
+                      </span>
+                    </div>
+                    <p className="dayoff-toggle-description">
+                      {dayOffHoursAvailableValue > 0
+                        ? (applyDayOffPay
+                            ? `Currently adding ${dayOffHoursAppliedValue.toFixed(2)} hrs to regular hours.`
+                            : 'Toggle on to include these hours in this payroll.')
+                        : 'No qualified day off records inside this cut-off.'}
+                    </p>
+                  </div>
+                  <label className="dayoff-toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={applyDayOffPay && dayOffHoursAvailableValue > 0}
+                      onChange={(e) => setApplyDayOffPay(e.target.checked)}
+                      disabled={dayOffHoursAvailableValue === 0}
+                    />
+                    <span className="dayoff-toggle-slider"></span>
+                  </label>
+                </div>
+
                 {/* Commissions Section */}
                 <div className="commissions-container">
                   <h2>Commissions</h2>
@@ -3505,7 +3564,7 @@ function Dashboard({ activeView, setActiveView }) {
                     
                     <div className="commission-total">
                       <span>Total Commissions:</span>
-                      <strong>{formatPeso(calculateTotalEarnings().totalCommissions)}</strong>
+                      <strong>{formatPeso(earningsSnapshot.totalCommissions)}</strong>
                     </div>
                   </div>
                 </div>
@@ -3545,7 +3604,7 @@ function Dashboard({ activeView, setActiveView }) {
                     </div>
                     <div className="deduction-total">
                       <span>Total Deductions:</span>
-                      <strong>{formatPeso(calculateTotalEarnings().totalDeductions)}</strong>
+                      <strong>{formatPeso(earningsSnapshot.totalDeductions)}</strong>
                     </div>
                   </div>
                 </div>
@@ -3560,37 +3619,47 @@ function Dashboard({ activeView, setActiveView }) {
                           <div className="section-title">Work Hours</div>
                           <div className="summary-row">
                             <span>Regular Hours</span>
-                            <strong>{calculateTotalEarnings().regularHours} hrs</strong>
+                            <strong>{earningsSnapshot.regularHours} hrs</strong>
                           </div>
                           <div className="summary-row">
                             <span>Overtime Hours</span>
-                            <strong>{calculateTotalEarnings().totalOvertimeHours} hrs</strong>
+                            <strong>{earningsSnapshot.totalOvertimeHours} hrs</strong>
                           </div>
-                          {parseFloat(calculateTotalEarnings().dayOffHours) > 0 && (
-                            <div className="summary-row day-off-row">
+                          {dayOffHoursAvailableValue > 0 && (
+                            <div className={`summary-row day-off-row ${dayOffHoursAppliedValue === 0 ? 'disabled' : ''}`}>
                               <span>Day Off Hours (Paid)</span>
-                              <strong>+{calculateTotalEarnings().dayOffHours} hrs</strong>
+                              <strong>
+                                {dayOffHoursAppliedValue > 0
+                                  ? `+${earningsSnapshot.dayOffHours} hrs`
+                                  : 'Not applied'}
+                              </strong>
                             </div>
                           )}
                           <div className="summary-row highlight">
                             <span>Total Hours</span>
-                            <strong>{calculateTotalEarnings().totalHours} hrs</strong>
+                            <strong>{earningsSnapshot.totalHours} hrs</strong>
                           </div>
                         </div>
 
                         <div className="summary-section">
                           <div className="section-title">Base Earnings</div>
                           <div className="summary-row">
-                            <span>Regular Pay ({calculateTotalEarnings().regularHours} hrs)</span>
-                            <strong>{formatPeso(calculateTotalEarnings().regularPay)}</strong>
+                            <span>Regular Pay ({earningsSnapshot.regularHours} hrs)</span>
+                            <strong>{formatPeso(earningsSnapshot.regularPay)}</strong>
                           </div>
                           <div className="summary-row">
-                            <span>Overtime Pay ({calculateTotalEarnings().totalOvertimeHours} hrs)</span>
-                            <strong>{formatPeso(calculateTotalEarnings().overtimePay)}</strong>
+                            <span>Overtime Pay ({earningsSnapshot.totalOvertimeHours} hrs)</span>
+                            <strong>{formatPeso(earningsSnapshot.overtimePay)}</strong>
                           </div>
+                          {parseFloat(earningsSnapshot.dayOffPay) > 0 && (
+                            <div className="summary-row day-off-row">
+                              <span>Day Off Pay ({earningsSnapshot.dayOffHours} hrs)</span>
+                              <strong>+{formatPeso(earningsSnapshot.dayOffPay)}</strong>
+                            </div>
+                          )}
                           <div className="summary-row highlight">
                             <span>Gross Pay</span>
-                            <strong>{formatPeso(calculateTotalEarnings().grossPay)}</strong>
+                            <strong>{formatPeso(earningsSnapshot.grossPay)}</strong>
                           </div>
                         </div>
 
@@ -3622,7 +3691,7 @@ function Dashboard({ activeView, setActiveView }) {
                           })}
                           <div className="summary-row highlight positive">
                             <span>Total Commissions</span>
-                            <strong>+{formatPeso(calculateTotalEarnings().totalCommissions)}</strong>
+                            <strong>+{formatPeso(earningsSnapshot.totalCommissions)}</strong>
                           </div>
                         </div>
 
@@ -3634,28 +3703,28 @@ function Dashboard({ activeView, setActiveView }) {
                               <strong>-{formatPeso(cashAdvance)}</strong>
                             </div>
                           )}
-                          {calculateTotalEarnings().lateMinutes > 0 && (
+                          {earningsSnapshot.lateMinutes > 0 && (
                             <div className="summary-row negative">
-                              <span>Late ({calculateTotalEarnings().lateMinutes} min @ ₱{lateDeductionRate}/min)</span>
-                              <strong>-{formatPeso(calculateTotalEarnings().lateDeduction)}</strong>
+                              <span>Late ({earningsSnapshot.lateMinutes} min @ ₱{lateDeductionRate}/min)</span>
+                              <strong>-{formatPeso(earningsSnapshot.lateDeduction)}</strong>
                             </div>
                           )}
                           <div className="summary-row highlight negative">
                             <span>Total Deductions</span>
-                            <strong>-{formatPeso(calculateTotalEarnings().totalDeductions)}</strong>
+                            <strong>-{formatPeso(earningsSnapshot.totalDeductions)}</strong>
                           </div>
                         </div>
 
                         <div className="summary-net-pay">
                           <span>NET PAY</span>
-                          <strong>{formatPeso(calculateTotalEarnings().netPay)}</strong>
+                          <strong>{formatPeso(earningsSnapshot.netPay)}</strong>
                         </div>
                       </>
                     ) : (
                       <div className="accountant-net-pay-only">
                         <div className="summary-net-pay">
                           <span>NET PAY</span>
-                          <strong>{formatPeso(calculateTotalEarnings().netPay)}</strong>
+                          <strong>{formatPeso(earningsSnapshot.netPay)}</strong>
                         </div>
                         <p className="restricted-notice">Full breakdown restricted to Manager access</p>
                       </div>
