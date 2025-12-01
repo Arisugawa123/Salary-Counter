@@ -2497,11 +2497,11 @@ function Dashboard({ activeView, setActiveView }) {
   }
 
   const getEmployeeDayOffHoursForPeriod = (employeeId, month, year, payPeriod) => {
+    // Get ALL day-off hours for the month, regardless of pay period
     const employeeDayOffs = dayOffRecords.filter(record =>
       record.employeeId === employeeId &&
       record.month === month &&
-      record.year === year &&
-      record.payPeriod === payPeriod
+      record.year === year
     )
 
     return employeeDayOffs.reduce((total, record) => total + (record.hoursPaid || 0), 0)
@@ -3481,23 +3481,22 @@ function Dashboard({ activeView, setActiveView }) {
                       <span className={`dayoff-toggle-hours ${dayOffHoursAvailableValue > 0 ? 'available' : 'empty'}`}>
                         {dayOffHoursAvailableValue > 0
                           ? `${dayOffHoursAvailableValue.toFixed(2)} hrs available`
-                          : 'No qualified hours'}
+                          : '0 hrs available'}
                       </span>
                     </div>
                     <p className="dayoff-toggle-description">
-                      {dayOffHoursAvailableValue > 0
-                        ? (applyDayOffPay
-                            ? `Currently adding ${dayOffHoursAppliedValue.toFixed(2)} hrs to regular hours.`
-                            : 'Toggle on to include these hours in this payroll.')
-                        : 'No qualified day off records inside this cut-off.'}
+                      {applyDayOffPay
+                        ? `Currently adding ${dayOffHoursAppliedValue.toFixed(2)} hrs to total hours.`
+                        : dayOffHoursAvailableValue > 0
+                          ? 'Toggle on to include these hours in this payroll.'
+                          : 'Toggle on to apply day off pay (if day off records exist).'}
                     </p>
                   </div>
                   <label className="dayoff-toggle-switch">
                     <input
                       type="checkbox"
-                      checked={applyDayOffPay && dayOffHoursAvailableValue > 0}
+                      checked={applyDayOffPay}
                       onChange={(e) => setApplyDayOffPay(e.target.checked)}
-                      disabled={dayOffHoursAvailableValue === 0}
                     />
                     <span className="dayoff-toggle-slider"></span>
                   </label>
