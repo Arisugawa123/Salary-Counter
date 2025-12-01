@@ -2441,9 +2441,7 @@ function Dashboard({ activeView, setActiveView }) {
       const day = date.getDate()
       const payPeriod = day <= 15 ? '1-15' : '16-31'
 
-      // Check if employee has too many absences in this pay period
-      const isQualified = dayOffForm.absenceCount < maxAbsencesForDayOff
-
+      // Always set 9 hours paid regardless of qualification
       const newDayOff = {
         employeeId: Number(dayOffForm.employeeId),
         employeeName: employee.name,
@@ -2451,8 +2449,8 @@ function Dashboard({ activeView, setActiveView }) {
         month: monthNames[date.getMonth()],
         year: date.getFullYear(),
         payPeriod: payPeriod,
-        hoursPaid: isQualified ? 9 : 0,
-        isQualified: isQualified,
+        hoursPaid: 9,
+        isQualified: true,
         absenceCount: dayOffForm.absenceCount,
         notes: dayOffForm.notes
       }
@@ -2478,8 +2476,7 @@ function Dashboard({ activeView, setActiveView }) {
         `Day off for ${employee.name} has been added.`,
         [
           { label: 'Date', value: new Date(dayOffForm.date).toLocaleDateString() },
-          { label: 'Status', value: isQualified ? 'Qualified (Paid)' : 'Not Qualified' },
-          { label: 'Hours Paid', value: isQualified ? '9 hours' : '0 hours' }
+          { label: 'Hours Paid', value: '9 hours' }
         ]
       )
     } catch (error) {
@@ -2504,8 +2501,7 @@ function Dashboard({ activeView, setActiveView }) {
       record.employeeId === employeeId &&
       record.month === month &&
       record.year === year &&
-      record.payPeriod === payPeriod &&
-      record.isQualified
+      record.payPeriod === payPeriod
     )
 
     return employeeDayOffs.reduce((total, record) => total + (record.hoursPaid || 0), 0)
@@ -2590,7 +2586,6 @@ function Dashboard({ activeView, setActiveView }) {
 
         // Count absences for this employee in this period
         const absenceCount = countAbsencesForPeriod(employee.id, selectedMonth, year, payPeriod)
-        const isQualified = absenceCount < maxAbsencesForDayOff
 
         const newDayOff = {
           employeeId: employee.id,
@@ -2599,8 +2594,8 @@ function Dashboard({ activeView, setActiveView }) {
           month: selectedMonth,
           year: year,
           payPeriod: payPeriod,
-          hoursPaid: isQualified ? 9 : 0,
-          isQualified: isQualified,
+          hoursPaid: 9,
+          isQualified: true,
           absenceCount: absenceCount,
           notes: 'Auto-generated day off'
         }
