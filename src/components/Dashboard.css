@@ -4758,6 +4758,8 @@ textarea.form-input {
 
 .payroll-detail-modal-v2 {
   max-width: 1200px;
+  width: min(1200px, 95vw);
+  min-width: min(900px, 95vw);
   max-height: 92vh;
   overflow: hidden;
   padding: 0;
