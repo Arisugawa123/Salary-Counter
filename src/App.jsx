@@ -30,13 +30,7 @@ function AppContent() {
   if (user?.role === 'cashier') {
     return (
       <div className="app">
-        <div className="main-content sidebar-closed">
-          <Header 
-            isSidebarOpen={false}
-            setIsSidebarOpen={setIsSidebarOpen}
-          />
-          <CashierDashboard />
-        </div>
+        <CashierDashboard />
       </div>
     )
   }

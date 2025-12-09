@@ -1418,7 +1418,8 @@ function CreateOrderView({ user, onOrderCreated }) {
     downPayment: '',
     isPahabol: false,
     assignedArtist: '',
-    rushOrder: false
+    rushOrder: false,
+    layoutCharge: true
   })
   const [sublimationData, setSublimationData] = useState({
     customerName: '',
@@ -1856,7 +1857,8 @@ function CreateOrderView({ user, onOrderCreated }) {
           rushOrder: false,
           paymentMethod: 'Cash',
           amountPaid: '',
-          downPayment: ''
+          downPayment: '',
+          layoutCharge: true
         })
       }
     }
@@ -2000,10 +2002,15 @@ function CreateOrderView({ user, onOrderCreated }) {
         const quantity = parseFloat(tarpaulinData.quantity) || 1
         const pricePerSqft = 12 // Price per square foot
         const area = width * height
-        const totalAmount = area * quantity * pricePerSqft
+        const baseAmount = area * quantity * pricePerSqft
+        const layoutCharge = tarpaulinData.layoutCharge ? 100 : 0
+        const rushOrderCharge = tarpaulinData.rushOrder ? 50 : 0
+        const totalAmount = baseAmount + layoutCharge + rushOrderCharge
         const downPayment = parseFloat(tarpaulinData.downPayment || 0) || 0
-        const amountPaid = downPayment
-        const balance = totalAmount - downPayment
+        // Down payment is only a reference amount, not actually paid yet
+        // Payment will be processed by cashier
+        const amountPaid = 0
+        const balance = totalAmount
 
         // Prepare order data object
         const orderData = {
@@ -4220,30 +4227,6 @@ function CreateOrderView({ user, onOrderCreated }) {
                     />
                   </div>
                 </div>
-
-                {/* Rush Order Toggle */}
-                <div className="form-field-compact rush-order-field">
-                  <label>Rush Order</label>
-                  <div className="rush-order-toggle-wrapper">
-                    <div className="rush-order-toggle-content">
-                      <div className="rush-order-toggle-icon">
-                        <Clock size={16} />
-                      </div>
-                      <div className="rush-order-toggle-info">
-                        <div className="rush-order-toggle-title">Priority Processing</div>
-                        <div className="rush-order-toggle-description">Urgent order handling</div>
-                      </div>
-                    </div>
-                    <label className="rush-order-toggle-switch">
-                      <input
-                        type="checkbox"
-                        checked={tarpaulinData.rushOrder}
-                        onChange={(e) => handleTarpaulinInputChange('rushOrder', e.target.checked)}
-                      />
-                      <span className="rush-order-toggle-slider"></span>
-                    </label>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -5053,6 +5036,54 @@ function CreateOrderView({ user, onOrderCreated }) {
                     </div>
                   </div>
 
+                  {/* Layout Charge */}
+                  <div className="form-field-compact full-width">
+                    <label>Layout Charge</label>
+                    <div className="layout-charge-wrapper">
+                      <div className="layout-charge-toggle-content">
+                        <div className="layout-charge-toggle-icon">
+                          <Package size={16} />
+                        </div>
+                        <div className="layout-charge-toggle-info">
+                          <div className="layout-charge-toggle-title">Design Layout</div>
+                          <div className="layout-charge-toggle-description">₱100.00</div>
+                        </div>
+                      </div>
+                      <label className="layout-charge-toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={tarpaulinData.layoutCharge}
+                          onChange={(e) => handleTarpaulinInputChange('layoutCharge', e.target.checked)}
+                        />
+                        <span className="layout-charge-toggle-slider"></span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Rush Order Toggle */}
+                  <div className="form-field-compact full-width">
+                    <label>Rush Order</label>
+                    <div className="rush-order-toggle-wrapper">
+                      <div className="rush-order-toggle-content">
+                        <div className="rush-order-toggle-icon">
+                          <Clock size={16} />
+                        </div>
+                        <div className="rush-order-toggle-info">
+                          <div className="rush-order-toggle-title">Priority Processing</div>
+                          <div className="rush-order-toggle-description">₱50.00</div>
+                        </div>
+                      </div>
+                      <label className="rush-order-toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={tarpaulinData.rushOrder}
+                          onChange={(e) => handleTarpaulinInputChange('rushOrder', e.target.checked)}
+                        />
+                        <span className="rush-order-toggle-slider"></span>
+                      </label>
+                    </div>
+                  </div>
+
                   {/* Payment Breakdown */}
                   <div className="payment-breakdown-detailed">
                     <div className="breakdown-header">
@@ -5066,7 +5097,10 @@ function CreateOrderView({ user, onOrderCreated }) {
                         const quantity = parseFloat(tarpaulinData.quantity) || 1;
                         const pricePerSqft = 12;
                         const area = width * height;
-                        const subtotal = area * quantity * pricePerSqft;
+                        const baseSubtotal = area * quantity * pricePerSqft;
+                        const layoutCharge = tarpaulinData.layoutCharge ? 100 : 0;
+                        const rushOrderCharge = tarpaulinData.rushOrder ? 50 : 0;
+                        const subtotal = baseSubtotal + layoutCharge + rushOrderCharge;
                         const downPayment = parseFloat(tarpaulinData.downPayment) || 0;
                         const balance = subtotal - downPayment;
 
@@ -5102,6 +5136,23 @@ function CreateOrderView({ user, onOrderCreated }) {
                                   <span className="breakdown-label">Price per sqft:</span>
                                   <span className="breakdown-value">₱{pricePerSqft.toFixed(2)}</span>
                                 </div>
+                                <div className="breakdown-divider"></div>
+                                <div className="breakdown-row breakdown-subtotal">
+                                  <span className="breakdown-label">Base Subtotal:</span>
+                                  <span className="breakdown-value">₱{baseSubtotal.toFixed(2)}</span>
+                                </div>
+                                {layoutCharge > 0 && (
+                                  <div className="breakdown-row">
+                                    <span className="breakdown-label">Layout Charge:</span>
+                                    <span className="breakdown-value">₱{layoutCharge.toFixed(2)}</span>
+                                  </div>
+                                )}
+                                {rushOrderCharge > 0 && (
+                                  <div className="breakdown-row">
+                                    <span className="breakdown-label">Rush Order Charge:</span>
+                                    <span className="breakdown-value">₱{rushOrderCharge.toFixed(2)}</span>
+                                  </div>
+                                )}
                                 <div className="breakdown-divider"></div>
                                 <div className="breakdown-row breakdown-subtotal">
                                   <span className="breakdown-label">Subtotal:</span>
@@ -5173,14 +5224,6 @@ function CreateOrderView({ user, onOrderCreated }) {
                           <span className="cart-detail-value-compact pahabol-badge-compact">Pahabol</span>
                         </div>
                       )}
-                    </div>
-                    <div className="cart-item-footer-compact">
-                      <div className="cart-item-price-compact">
-                        <span className="price-label-compact">Total Amount:</span>
-                        <span className="price-value-compact">
-                          ₱{tarpaulinData.downPayment ? parseFloat(tarpaulinData.downPayment).toFixed(2) : '0.00'}
-                        </span>
-                      </div>
                     </div>
                   </div>
                 </div>

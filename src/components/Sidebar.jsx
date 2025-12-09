@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { 
   LayoutDashboard, 
-  DollarSign, 
+  DollarSign,
   Wallet,
   CreditCard,
   Calendar,
@@ -12,7 +12,7 @@ import {
 import { useAuth } from '../contexts/AuthContext'
 import './Sidebar.css'
 
-function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, sublimationItems, customersItems, currentView, onMenuClick }) {
+function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, sublimationItems, customersItems, transactionsItems, reportsItems, productionItems, settingsItems, currentView, onMenuClick }) {
   const { user } = useAuth()
   const isManager = user?.role === 'manager'
   const [showAccessModal, setShowAccessModal] = useState(false)
@@ -82,10 +82,11 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, subl
     <aside className={`sidebar ${isOpen ? 'open' : 'closed'}`}>
       <div className="sidebar-header">
         <div className="logo-container">
-          <div className="logo-icon">
-            <DollarSign size={24} />
-          </div>
-          {isOpen && <span className="logo-text">IRONWOLF</span>}
+          <img 
+            src="/ironwolf-logo.png" 
+            alt="IRONWOLF Digital Printing" 
+            className="logo-image"
+          />
         </div>
       </div>
 
@@ -98,7 +99,7 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, subl
                 onClick={() => finalSetActiveView(item.id)}
                 title={!isOpen ? item.label : ''}
               >
-                <item.icon size={20} />
+                <item.icon size={18} />
                 {isOpen && <span>{item.label}</span>}
               </button>
             </li>
@@ -117,7 +118,7 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, subl
                     onClick={() => finalSetActiveView(item.id)}
                     title={!isOpen ? item.label : ''}
                   >
-                    <item.icon size={20} />
+                    <item.icon size={18} />
                     {isOpen && <span>{item.label}</span>}
                   </button>
                 </li>
@@ -138,7 +139,91 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, subl
                     onClick={() => finalSetActiveView(item.id)}
                     title={!isOpen ? item.label : ''}
                   >
-                    <item.icon size={20} />
+                    <item.icon size={18} />
+                    {isOpen && <span>{item.label}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {transactionsItems && transactionsItems.length > 0 && (
+          <>
+            <div className="sidebar-divider"></div>
+            {isOpen && <div className="sidebar-category">Transactions</div>}
+            <ul className="menu-list">
+              {transactionsItems.map(item => (
+                <li key={item.id}>
+                  <button
+                    className={`menu-item ${finalActiveView === item.id ? 'active' : ''}`}
+                    onClick={() => finalSetActiveView(item.id)}
+                    title={!isOpen ? item.label : ''}
+                  >
+                    <item.icon size={18} />
+                    {isOpen && <span>{item.label}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {reportsItems && reportsItems.length > 0 && (
+          <>
+            <div className="sidebar-divider"></div>
+            {isOpen && <div className="sidebar-category">Reports</div>}
+            <ul className="menu-list">
+              {reportsItems.map(item => (
+                <li key={item.id}>
+                  <button
+                    className={`menu-item ${finalActiveView === item.id ? 'active' : ''}`}
+                    onClick={() => finalSetActiveView(item.id)}
+                    title={!isOpen ? item.label : ''}
+                  >
+                    <item.icon size={18} />
+                    {isOpen && <span>{item.label}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {productionItems && productionItems.length > 0 && (
+          <>
+            <div className="sidebar-divider"></div>
+            {isOpen && <div className="sidebar-category">Production</div>}
+            <ul className="menu-list">
+              {productionItems.map(item => (
+                <li key={item.id}>
+                  <button
+                    className={`menu-item ${finalActiveView === item.id ? 'active' : ''}`}
+                    onClick={() => finalSetActiveView(item.id)}
+                    title={!isOpen ? item.label : ''}
+                  >
+                    <item.icon size={18} />
+                    {isOpen && <span>{item.label}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {settingsItems && settingsItems.length > 0 && (
+          <>
+            <div className="sidebar-divider"></div>
+            {isOpen && <div className="sidebar-category">Settings</div>}
+            <ul className="menu-list">
+              {settingsItems.map(item => (
+                <li key={item.id}>
+                  <button
+                    className={`menu-item ${finalActiveView === item.id ? 'active' : ''}`}
+                    onClick={() => finalSetActiveView(item.id)}
+                    title={!isOpen ? item.label : ''}
+                  >
+                    <item.icon size={18} />
                     {isOpen && <span>{item.label}</span>}
                   </button>
                 </li>
@@ -158,7 +243,7 @@ function Sidebar({ isOpen, setIsOpen, activeView, setActiveView, menuItems, subl
                     onClick={() => item.id === 'settings' ? handleSettingsClick() : finalSetActiveView(item.id)}
                     title={!isOpen ? item.label : ''}
                   >
-                    <item.icon size={20} />
+                    <item.icon size={18} />
                     {isOpen && <span>{item.label}</span>}
                   </button>
                 </li>
